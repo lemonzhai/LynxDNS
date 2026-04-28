@@ -1,0 +1,51 @@
+server:
+  enabled: true
+  listen_addr: "127.0.0.1"
+  listen_port: 15353
+
+api:
+  addr: "127.0.0.1"
+  port: 19090
+  secret: "test-secret-123"
+
+dns:
+  domestic:
+    - "udp://223.5.5.5:53"
+    - "udp://119.29.29.29:53"
+  remote:
+    - "udp://8.8.8.8:53"
+    - "udp://1.1.1.1:53"
+  default: domestic
+  bootstrap:
+    - "udp://223.5.5.5:53"
+
+advanced:
+  concurrency: 3
+  idle_timeout: 30
+  cache:
+    enabled: true
+    size: 1024
+    lazy: true
+  leak_protection:
+    enabled: true
+    mode: strict
+
+geo:
+  auto_update: false
+  update_cron: "0 3 * * *"
+  geosite_url: ""
+  geoip_url: ""
+  ad_filter_url: ""
+  data_dir: "./data"
+
+routing:
+  geosite:
+    remote: []
+    domestic: []
+    ad_filter: []
+  geoip:
+    remote: []
+
+log:
+  level: "debug"
+  file: ""

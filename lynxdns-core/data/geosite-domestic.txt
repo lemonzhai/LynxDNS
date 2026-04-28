@@ -1,0 +1,7 @@
+# GeoSite Domestic 分类 - 使用国内 DNS 的域名
+baidu.com
+qq.com
+taobao.com
+jd.com
+bilibili.com
+zhihu.com

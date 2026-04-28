@@ -1,0 +1,8 @@
+
+config lynxdns 'main'
+	option enabled '0'
+
+config api 'api'
+	option addr '127.0.0.1'
+	option port '5335'
+	option secret ''

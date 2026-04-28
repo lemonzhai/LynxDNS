@@ -1,0 +1,12 @@
+dist/
+*.exe
+*.tmp
+cookies.txt
+node_modules/
+package-lock.json
+lookup2.json
+lookup3.json
+*.docx
+docx_content.txt
+VLvw0Z9QwJQFPNs1rWKTOlZCnjf9jIYhnJCKRTD4.tmp
+test-*.json

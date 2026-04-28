@@ -1,0 +1,6 @@
+# 广告域名列表
+ad.doubleclick.net
+ads.google.com
+analytics.google.com
+ad.qq.com
+c.cnzz.com

@@ -1,0 +1,60 @@
+server:
+  enabled: true
+  listen_addr: "0.0.0.0"
+  listen_port: 5334
+
+api:
+  addr: "127.0.0.1"
+  port: 5335
+  secret: ""
+
+dns:
+  domestic:
+    - "udp://223.5.5.5:53"
+    - "udp://119.29.29.29:53"
+  remote:
+    - "tls://8.8.8.8:853"
+  default: domestic
+  bootstrap:
+    - "udp://223.5.5.5:53"
+    - "udp://119.29.29.29:53"
+
+advanced:
+  concurrency: 3
+  idle_timeout: 30
+  cache:
+    enabled: true
+    size: 4096
+    lazy: true
+  leak_protection:
+    enabled: true
+    mode: loose
+  ad_filter:
+    enabled: true
+
+geo:
+  auto_update: true
+  update_cron: "0 3 * * *"
+  geosite_url: "https://github.com/Loyalsoldier/v2ray-rules-dat/releases/latest/download/geosite.dat"
+  geoip_url: "https://github.com/Loyalsoldier/geoip/releases/latest/download/geoip.dat"
+  ad_filter_url: "https://adguardteam.github.io/AdGuardSDNSFilter/Filters/filter.txt"
+  data_dir: "/etc/lynxdns/data"
+
+routing:
+  geosite:
+    remote:
+      - "geolocation-!cn"
+      - "google"
+      - "github"
+      - "gfw"
+    domestic:
+      - "cn"
+    ad_filter:
+      - "category-ads-all"
+  geoip:
+    remote:
+      - "!cn"
+
+log:
+  level: "info"
+  file: "/var/log/lynxdns.log"

@@ -1,0 +1,7 @@
+# GeoSite Remote 分类 - 需要使用远程 DNS 的域名
+google.com
+youtube.com
+github.com
+twitter.com
+facebook.com
+instagram.com

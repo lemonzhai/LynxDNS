@@ -1,0 +1,33 @@
+#!/bin/sh /etc/rc.common
+
+START=99
+STOP=10
+USE_PROCD=1
+
+PROG=/etc/lynxdns/lynxdns
+CONF=/etc/lynxdns/config.yaml
+
+start_service() {
+	local enabled
+
+	config_load lynxdns
+	config_get_bool enabled main enabled 0
+
+	[ "$enabled" -eq 0 ] && return 1
+
+	procd_open_instance
+	procd_set_param command "$PROG" -config "$CONF"
+	procd_set_param respawn 3600 5 5
+	procd_set_param stderr 1
+	procd_set_param stdout 1
+	procd_set_param file "$CONF"
+	procd_close_instance
+}
+
+service_triggers() {
+	procd_add_reload_trigger "lynxdns"
+}
+
+stop_service() {
+	killall lynxdns 2>/dev/null
+}

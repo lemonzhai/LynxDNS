@@ -1,0 +1,19 @@
+# GeoSite 数据文件
+# 使用 @category 定义分类
+# 域名格式：.example.com 表示匹配该域名及其所有子域名
+
+@remote
+.google.com
+.youtube.com
+.github.com
+.twitter.com
+.facebook.com
+.instagram.com
+
+@domestic
+.baidu.com
+.qq.com
+.taobao.com
+.jd.com
+.bilibili.com
+.zhihu.com

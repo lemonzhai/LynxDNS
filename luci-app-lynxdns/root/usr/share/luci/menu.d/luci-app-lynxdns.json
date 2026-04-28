@@ -1,0 +1,69 @@
+{
+	"admin/services/lynxdns": {
+		"title": "LynxDNS",
+		"order": 60,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/overview"
+		},
+		"depends": {
+			"acl": [ "luci-app-lynxdns" ]
+		}
+	},
+	"admin/services/lynxdns/overview": {
+		"title": "运行状态",
+		"order": 1,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/overview"
+		}
+	},
+	"admin/services/lynxdns/dns": {
+		"title": "DNS 服务器",
+		"order": 10,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/dns"
+		}
+	},
+	"admin/services/lynxdns/advanced": {
+		"title": "高级设置",
+		"order": 20,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/advanced"
+		}
+	},
+	"admin/services/lynxdns/geo": {
+		"title": "GeoIP & GeoSite 更新",
+		"order": 30,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/geo"
+		}
+	},
+	"admin/services/lynxdns/routing": {
+		"title": "分流规则",
+		"order": 35,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/routing"
+		}
+	},
+	"admin/services/lynxdns/rules": {
+		"title": "自定义规则",
+		"order": 40,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/rules"
+		}
+	},
+	"admin/services/lynxdns/logs": {
+		"title": "运行日志",
+		"order": 50,
+		"action": {
+			"type": "view",
+			"path": "lynxdns/logs"
+		}
+	}
+}
