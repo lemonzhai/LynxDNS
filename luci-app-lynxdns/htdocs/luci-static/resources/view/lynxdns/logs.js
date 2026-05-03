@@ -7,6 +7,19 @@ var logWs = null;
 var queryWs = null;
 var wsConnected = false;
 var logAutoFollow = true;
+var activeCatFilter = '';
+
+var catDefs = {
+	'系统':    { 'bg': '#2a1a4a', 'color': '#b388ff' },
+	'远程DNS': { 'bg': '#1a2a4a', 'color': '#64b5f6' },
+	'国内DNS': { 'bg': '#1a3a1a', 'color': '#81c784' },
+	'DNS':     { 'bg': '#1a2a3a', 'color': '#80cbc4' },
+	'Geo':     { 'bg': '#1a3a3a', 'color': '#4dd0e1' },
+	'广告':    { 'bg': '#3a0a2a', 'color': '#f48fb1' },
+	'服务':    { 'bg': '#1a2a3a', 'color': '#80cbc4' },
+	'配置':    { 'bg': '#3a2a0a', 'color': '#ffe082' },
+	'Web':     { 'bg': '#2a2a3a', 'color': '#b0bec5' }
+};
 
 function apiCall(method, path, data) {
 	return new Promise(function(resolve) {
@@ -63,15 +76,36 @@ function utcToLocal(utcStr) {
 		d.getSeconds().toString().padStart(2, '0');
 }
 
-function colorizeLogLine(line) {
-	if (!line || !line.trim()) return '';
-	var levelColors = {
-		'debug': { 'bg': '#3a3a4a', 'text': '#999' },
-		'info': { 'bg': '#1a3a5c', 'text': '#4a90d9' },
-		'warn': { 'bg': '#3a2a0a', 'text': '#f0ad4e' },
-		'warning': { 'bg': '#3a2a0a', 'text': '#f0ad4e' },
-		'error': { 'bg': '#3a1a1a', 'text': '#d9534f' }
-	};
+function getLogCategory(message) {
+	var ml = message.toLowerCase();
+	if (ml.indexOf('started') >= 0 || ml.indexOf('stopped') >= 0 || ml.indexOf('shutting down') >= 0 ||
+		ml.indexOf('signal') >= 0 || ml.indexOf('lynxdns') >= 0 && (ml.indexOf('success') >= 0 || ml.indexOf('init') >= 0)) {
+		return '系统';
+	}
+	if (ml.indexOf('upstream dns') >= 0) {
+		if (ml.indexOf('8.8.8.8') >= 0 || ml.indexOf('1.1.1.1') >= 0 || ml.indexOf('tls://') >= 0 || ml.indexOf('doh') >= 0 || ml.indexOf('https://') >= 0) {
+			return '远程DNS';
+		}
+		if (ml.indexOf('119.29.29.29') >= 0 || ml.indexOf('223.5.5.5') >= 0 || ml.indexOf('114.114') >= 0 || ml.indexOf('udp://') >= 0) {
+			return '国内DNS';
+		}
+		return 'DNS';
+	}
+	if (ml.indexOf('geoip') >= 0 || ml.indexOf('geosite') >= 0) return 'Geo';
+	if (ml.indexOf('ad_filter') >= 0 || ml.indexOf('ad filter') >= 0 || ml.indexOf('adblock') >= 0) return '广告';
+	if (ml.indexOf('api') >= 0 || ml.indexOf('server starting') >= 0 || ml.indexOf('listening') >= 0) return '服务';
+	if (ml.indexOf('rule') >= 0 || ml.indexOf('config') >= 0 || ml.indexOf('reload') >= 0) return '配置';
+	if (ml.indexOf('luci') >= 0) return 'Web';
+	return '';
+}
+
+function catBadge(name) {
+	var c = catDefs[name];
+	if (!c) return '';
+	return '<span style="display:inline-block;padding:0 4px;border-radius:3px;font-size:9px;font-weight:bold;background:' + c.bg + ';color:' + c.color + '">' + name + '</span> ';
+}
+
+function parseLogMessage(line) {
 	var cleaned = line.replace(/^\w{3}\s+\w{3}\s+\d{1,2}\s+\d{2}:\d{2}:\d{2}\s+\d{4}\s+\S+\s+\S+\[\d+\]:\s*/, '');
 	var level = '';
 	var timestamp = '';
@@ -94,20 +128,45 @@ function colorizeLogLine(line) {
 		if (tMatch) timestamp = tMatch[1];
 		message = afterLevel2;
 	}
-	var escaped = message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-	var lc = levelColors[level] || { 'bg': '#2a2a3e', 'text': '#ccc' };
+	return { level: level, timestamp: timestamp, message: message };
+}
+
+function colorizeLogLine(line) {
+	if (!line || !line.trim()) return '';
+	var levelColors = {
+		'debug': { 'bg': '#3a3a4a', 'text': '#999' },
+		'info': { 'bg': '#1a3a5c', 'text': '#4a90d9' },
+		'warn': { 'bg': '#3a2a0a', 'text': '#f0ad4e' },
+		'warning': { 'bg': '#3a2a0a', 'text': '#f0ad4e' },
+		'error': { 'bg': '#3a1a1a', 'text': '#d9534f' }
+	};
+	var p = parseLogMessage(line);
+	var escaped = p.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+	var lc = levelColors[p.level] || { 'bg': '#2a2a3e', 'text': '#ccc' };
 	var badge = '';
-	if (level) {
-		var label = level.toUpperCase();
+	if (p.level) {
+		var label = p.level.toUpperCase();
 		badge = '<span style="display:inline-block;padding:0 5px;border-radius:3px;' +
 			'font-size:10px;font-weight:bold;background:' + lc.bg + ';color:' + lc.text + '">' +
 			label + '</span> ';
 	}
-	var timeHtml = timestamp
-		? '<span style="color:#666;font-size:11px;margin-right:4px">' + timestamp + '</span>'
+	var catName = getLogCategory(p.message);
+	var cat = catBadge(catName);
+	var timeHtml = p.timestamp
+		? '<span style="color:#666;font-size:11px;margin-right:4px">' + p.timestamp + '</span>'
 		: '';
-	return '<div style="padding:2px 4px;border-bottom:1px solid #222;word-break:break-all;white-space:pre-wrap;line-height:1.6">' +
-		timeHtml + badge + '<span style="color:' + lc.text + '">' + escaped + '</span></div>';
+	return '<div data-cat="' + catName + '" style="padding:2px 4px;border-bottom:1px solid #222;word-break:break-all;white-space:pre-wrap;line-height:1.6">' +
+		timeHtml + badge + cat + '<span style="color:' + lc.text + '">' + escaped + '</span></div>';
+}
+
+function applyCatFilter() {
+	var el = document.getElementById('log-content');
+	if (!el) return;
+	var children = el.children;
+	for (var i = 0; i < children.length; i++) {
+		var cat = children[i].getAttribute('data-cat') || '';
+		children[i].style.display = (!activeCatFilter || cat === activeCatFilter) ? '' : 'none';
+	}
 }
 
 function renderLogHtml(text) {
@@ -180,8 +239,7 @@ return view.extend({
 		apiBase = L.url('admin/services/lynxdns/api');
 		return Promise.all([
 			apiGet('/log_read?lines=200').catch(function() { return { code: 500 }; }),
-			apiGet('/ws_config').catch(function() { return { code: 500 }; }),
-			apiGet('/log_retention').catch(function() { return { code: 500 }; })
+			apiGet('/ws_config').catch(function() { return { code: 500 }; })
 		]);
 	},
 
@@ -198,19 +256,15 @@ return view.extend({
 
 		var logData = (logResp.code === 0) ? logResp.data : null;
 		var wsConfig = (wsConfigResp.code === 0) ? wsConfigResp.data : null;
-		var retentionResp = data[2] || {};
-		var retention = (retentionResp.code === 0) ? retentionResp.data : null;
 
 		var m = E('div', { 'class': 'cbi-map' }, [
 			E('div', { 'class': 'cbi-map-descr' }, '实时运行日志和诊断工具。')
 		]);
 
-		// ---- Tools Section ----
 		var toolsSection = E('fieldset', { 'class': 'cbi-section', 'style': 'padding:20px' }, [
 			E('legend', {}, '工具')
 		]);
 
-		// DNS Lookup Diagnostic Tool
 		var lookupInput = E('input', {
 			'type': 'text',
 			'class': 'cbi-input-text',
@@ -271,7 +325,6 @@ return view.extend({
 		]));
 		m.appendChild(toolsSection);
 
-		// ---- Runtime Logs Section ----
 		var logSection = E('fieldset', { 'class': 'cbi-section', 'style': 'padding:20px' }, [
 			E('legend', {}, '运行日志')
 		]);
@@ -279,31 +332,6 @@ return view.extend({
 		var logControls = E('div', {
 			'style': 'display:flex;gap:8px;margin-bottom:8px;align-items:center;flex-wrap:wrap'
 		});
-
-		var retentionSelect = E('select', {
-			'class': 'cbi-input-select'
-		}, [
-			E('option', { 'value': '3600' }, '1 小时'),
-			E('option', { 'value': '21600' }, '6 小时'),
-			E('option', { 'value': '43200' }, '12 小时'),
-			E('option', { 'value': '86400' }, '1 天'),
-			E('option', { 'value': '259200' }, '3 天'),
-			E('option', { 'value': '604800' }, '7 天'),
-			E('option', { 'value': '2592000' }, '30 天')
-		]);
-		if (retention && retention.seconds) {
-			retentionSelect.value = String(retention.seconds);
-		} else {
-			retentionSelect.value = '604800';
-		}
-		retentionSelect.addEventListener('change', function() {
-			apiPost('/log_retention', { seconds: parseInt(this.value) }).then(function(resp) {
-				showToast(resp.code === 0 ? '日志保存时长已更新。' : '更新失败: ' + (resp.message || ''));
-			});
-		});
-		logControls.appendChild(E('label', {
-			'style': 'display:flex;align-items:center;gap:4px'
-		}, ['保存时长: ', retentionSelect]));
 
 		var levelSelect = E('select', {
 			'class': 'cbi-input-select',
@@ -318,6 +346,23 @@ return view.extend({
 		logControls.appendChild(E('label', {
 			'style': 'display:flex;align-items:center;gap:4px'
 		}, ['级别: ', levelSelect]));
+
+		var catOptions = [E('option', { 'value': '', 'selected': true }, '全部分类')];
+		Object.keys(catDefs).forEach(function(key) {
+			catOptions.push(E('option', { 'value': key }, key));
+		});
+		var catSelect = E('select', {
+			'class': 'cbi-input-select',
+			'style': 'height:40px'
+		}, catOptions);
+		logControls.appendChild(E('label', {
+			'style': 'display:flex;align-items:center;gap:4px'
+		}, ['分类: ', catSelect]));
+
+		catSelect.addEventListener('change', function() {
+			activeCatFilter = this.value;
+			applyCatFilter();
+		});
 
 		var clearLogBtn = E('button', {
 			'class': 'cbi-button cbi-button-remove',
@@ -336,7 +381,6 @@ return view.extend({
 
 		logSection.appendChild(logControls);
 
-		// Log textarea
 		var logContainer = E('div', {
 			'id': 'log-content',
 			'style': 'width:100%;height:400px;font-family:monospace;' +
@@ -353,14 +397,12 @@ return view.extend({
 
 		startAutoRefresh();
 
-		// ---- WebSocket Initialization ----
 		function initWebSocket(config, levelSelect) {
 			var wsHost = config.host || window.location.hostname;
 			var wsPort = config.port || '5335';
 			var wsToken = config.secret || '';
 			var wsProtocol = (window.location.protocol === 'https:') ? 'wss:' : 'ws:';
 
-			// Connect to log stream via WebSocket
 			function connectLogWs() {
 				var level = levelSelect ? levelSelect.value : '';
 				var url = wsProtocol + '//' + wsHost + ':' + wsPort +
@@ -386,7 +428,13 @@ return view.extend({
 						} catch (e) {
 							line = event.data;
 						}
-						el.innerHTML = colorizeLogLine(line) + el.innerHTML;
+						var html = colorizeLogLine(line);
+						if (activeCatFilter) {
+							var p = parseLogMessage(line);
+							var catName = getLogCategory(p.message);
+							if (catName !== activeCatFilter) return;
+						}
+						el.innerHTML = html + el.innerHTML;
 						while (el.children.length > 500) {
 							el.removeChild(el.lastChild);
 						}
@@ -439,7 +487,6 @@ return view.extend({
 			}
 			connectQueryWs();
 
-			// Reconnect log WebSocket when level filter changes
 			if (levelSelect) {
 				levelSelect.addEventListener('change', function() {
 					if (logWs) {
@@ -451,7 +498,6 @@ return view.extend({
 			}
 		}
 
-		// ---- HTTP Polling: Logs ----
 		var lastLogContent = '';
 
 		function refreshLogs() {
@@ -463,13 +509,13 @@ return view.extend({
 				if (logs === lastLogContent) return;
 				lastLogContent = logs;
 				el.innerHTML = renderLogHtml(logs);
+				if (activeCatFilter) applyCatFilter();
 				if (logAutoFollow) {
 					el.scrollTop = 0;
 				}
 			});
 		}
 
-		// ---- Auto-refresh Control ----
 		var logTimer = null;
 
 		function startAutoRefresh() {

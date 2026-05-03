@@ -4,7 +4,7 @@
 'require uci';
 
 var apiBase;
-var concurrencyInput, idleTimeoutInput, cacheSizeInput, leakModeSelect, logLevelSelect, logFileInput;
+var concurrencyInput, idleTimeoutInput, cacheSizeInput, leakModeSelect, logLevelSelect, logFileInput, retentionSelect;
 var listenAddrInput, listenPortInput, apiAddrInput, apiPortInput, apiSecretInput;
 
 function apiCall(method, path, data) {
@@ -23,6 +23,7 @@ function apiCall(method, path, data) {
 }
 
 function apiGet(p) { return apiCall('GET', p, null); }
+function apiPost(p, d) { return apiCall('POST', p, d); }
 function apiPatch(p, d) { return apiCall('PATCH', p, d); }
 function apiDelete(p) { return apiCall('DELETE', p, null); }
 
@@ -49,7 +50,8 @@ return view.extend({
 		return Promise.all([
 			uci.load('lynxdns'),
 			apiGet('/config').catch(function() { return { code: 500 }; }),
-			apiGet('/ws_config').catch(function() { return { code: 500 }; })
+			apiGet('/ws_config').catch(function() { return { code: 500 }; }),
+			apiGet('/log_retention').catch(function() { return { code: 500 }; })
 		]);
 	},
 
@@ -59,6 +61,8 @@ return view.extend({
 		}
 		var config = (data[1] && data[1].code === 0) ? data[1].data : {};
 		var wsCfg = (data[2] && data[2].code === 0) ? data[2].data : {};
+		var retentionResp = data[3] || {};
+		var retention = (retentionResp.code === 0) ? retentionResp.data : null;
 		var adv = config.advanced || {};
 		var cache = adv.cache || {};
 		var leak = adv.leak_protection || {};
@@ -195,6 +199,19 @@ return view.extend({
 		section.appendChild(fieldRow('日志级别', logLevelSelect,
 			'日志输出的详细程度。Debug 输出最详细，Error 仅输出错误信息。'));
 
+		retentionSelect = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': '3600' }, '1 小时'),
+			E('option', { 'value': '21600' }, '6 小时'),
+			E('option', { 'value': '43200' }, '12 小时'),
+			E('option', { 'value': '86400' }, '1 天'),
+			E('option', { 'value': '259200' }, '3 天'),
+			E('option', { 'value': '604800' }, '7 天'),
+			E('option', { 'value': '2592000' }, '30 天')
+		]);
+		retentionSelect.value = (retention && retention.seconds) ? String(retention.seconds) : '604800';
+		section.appendChild(fieldRow('保存时长', retentionSelect,
+			'日志文件的最大保存时间，超过此时间的日志将被自动清理。'));
+
 		logFileInput = E('input', {
 			'type': 'text', 'class': 'cbi-input-text',
 			'value': log.file || '/var/log/lynxdns.log',
@@ -259,6 +276,11 @@ return view.extend({
 				uci.set('lynxdns', 'api', 'secret', apiSecretInput.value);
 				uci.save();
 				uci.apply();
+				apiPost('/log_retention', { seconds: parseInt(retentionSelect.value) }).then(function(retResp) {
+					if (retResp.code !== 0) {
+						showToast('保存时长更新失败: ' + (retResp.message || ''));
+					}
+				});
 				showToast('高级设置已保存并热加载完成。');
 			} else {
 				showToast('保存失败：' + (resp.message || '未知错误'));

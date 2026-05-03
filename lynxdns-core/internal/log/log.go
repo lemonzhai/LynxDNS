@@ -18,6 +18,28 @@ const (
 	ERROR
 )
 
+// ANSI color codes for terminal output
+const (
+	colorReset  = "\x1b[0m"
+	colorRed    = "\x1b[31m"
+	colorGreen  = "\x1b[32m"
+	colorYellow = "\x1b[33m"
+	colorBlue   = "\x1b[34m"
+	colorPurple = "\x1b[35m"
+	colorCyan   = "\x1b[36m"
+	colorWhite  = "\x1b[37m"
+)
+
+// DNS action colors
+const (
+	ColorDomestic  = colorGreen   // 国内 DNS - 绿色
+	ColorRemote    = colorCyan    // 远程 DNS - 青色
+	ColorCacheHit  = colorYellow  // 缓存命中 - 黄色
+	ColorBlocked   = colorRed     // 拦截 - 红色
+	ColorRedirect  = colorPurple  // 重定向 - 紫色
+	ColorDefault   = colorWhite   // 默认 - 白色
+)
+
 func (l Level) String() string {
 	switch l {
 	case DEBUG:
@@ -144,6 +166,61 @@ func (l *Logger) Info(format string, args ...interface{})  { l.log(INFO, format,
 func (l *Logger) Warn(format string, args ...interface{})  { l.log(WARN, format, args...) }
 func (l *Logger) Error(format string, args ...interface{}) { l.log(ERROR, format, args...) }
 
+// ColorInfo outputs an INFO level log with ANSI color
+func (l *Logger) ColorInfo(color string, format string, args ...interface{}) {
+	l.logWithColor(INFO, color, format, args...)
+}
+
+// logWithColor outputs a colored log entry
+func (l *Logger) logWithColor(level Level, color string, format string, args ...interface{}) {
+	if level < l.level {
+		return
+	}
+
+	entry := Entry{
+		Timestamp: time.Now().UTC(),
+		Level:     level,
+		Message:   fmt.Sprintf(format, args...),
+	}
+
+	// Colored line for terminal
+	coloredLine := fmt.Sprintf("[%s] %s%s%s %s%s%s\n",
+		entry.Timestamp.Format("2006-01-02T15:04:05.000Z"),
+		colorReset,
+		entry.Level.String(),
+		colorReset,
+		color,
+		entry.Message,
+		colorReset,
+	)
+
+	// Plain line for file output
+	plainLine := fmt.Sprintf("[%s] %s %s\n",
+		entry.Timestamp.Format("2006-01-02T15:04:05.000Z"),
+		entry.Level.String(),
+		entry.Message,
+	)
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	for _, w := range l.outputs {
+		// Check if output is a terminal (os.Stdout or os.Stderr)
+		if w == os.Stdout || w == os.Stderr {
+			w.Write([]byte(coloredLine))
+		} else {
+			w.Write([]byte(plainLine))
+		}
+	}
+
+	for _, sub := range l.subscribers {
+		select {
+		case sub <- entry:
+		default:
+		}
+	}
+}
+
 func SetLevel(level Level)            { defaultLogger.SetLevel(level) }
 func AddOutput(w io.Writer)           { defaultLogger.AddOutput(w) }
 func Subscribe() chan Entry           { return defaultLogger.Subscribe() }
@@ -152,3 +229,4 @@ func Debug(format string, args ...interface{}) { defaultLogger.Debug(format, arg
 func Info(format string, args ...interface{})  { defaultLogger.Info(format, args...) }
 func Warn(format string, args ...interface{})  { defaultLogger.Warn(format, args...) }
 func Error(format string, args ...interface{}) { defaultLogger.Error(format, args...) }
+func ColorInfo(color string, format string, args ...interface{}) { defaultLogger.ColorInfo(color, format, args...) }

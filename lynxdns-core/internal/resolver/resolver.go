@@ -517,16 +517,35 @@ func (r *Resolver) Uptime() time.Duration {
 }
 
 func (r *Resolver) emitLog(ql QueryLog) {
+	// Get color based on action
+	var color string
+	switch ql.Action {
+	case ActionDomestic:
+		color = xlog.ColorDomestic  // 绿色 - 国内DNS
+	case ActionRemote:
+		color = xlog.ColorRemote    // 青色 - 远程DNS
+	case ActionCacheHit:
+		color = xlog.ColorCacheHit  // 黄色 - 缓存命中
+	case ActionBlocked:
+		color = xlog.ColorBlocked   // 红色 - 拦截
+	case ActionRedirect:
+		color = xlog.ColorRedirect  // 紫色 - 重定向
+	case ActionDefault:
+		color = xlog.ColorDefault   // 白色 - 默认策略
+	default:
+		color = xlog.ColorDefault
+	}
+
 	switch ql.Action {
 	case ActionCacheHit:
-		xlog.Debug("[DNS] %s %s %s -> cache hit (%.1fms)",
+		xlog.ColorInfo(color, "[DNS] %s %s %s -> cache hit (%.1fms)",
 			ql.Action, ql.Type, ql.Domain, ql.LatencyMs)
 	case ActionBlocked:
-		xlog.Info("[DNS] %s %s %s [%s]",
+		xlog.ColorInfo(color, "[DNS] %s %s %s [%s]",
 			ql.Action, ql.Type, ql.Domain, ql.MatchedRule)
 	default:
 		ips := strings.Join(ql.ResultIPs, ",")
-		xlog.Info("[DNS] %s %s %s -> %s [%s] (%.1fms via %s)",
+		xlog.ColorInfo(color, "[DNS] %s %s %s -> %s [%s] (%.1fms via %s)",
 			ql.Action, ql.Type, ql.Domain, ips, ql.MatchedRule, ql.LatencyMs, ql.ServerUsed)
 	}
 

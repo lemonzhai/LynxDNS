@@ -52,11 +52,7 @@ func New(geoMgr *xgeodata.Manager, autoUpdate bool, cronExpr string, geositeURL 
 	}
 
 	if autoUpdate && cronExpr != "" {
-		loc, locErr := time.LoadLocation("Asia/Shanghai")
-		if locErr != nil || loc == nil {
-			loc = time.UTC
-		}
-		u.cron = cron.New(cron.WithLocation(loc))
+		u.cron = cron.New(cron.WithLocation(time.Local))
 		_, err := u.cron.AddFunc(cronExpr, func() {
 			xlog.Info("scheduled GeoIP/GeoSite update started")
 			if err := u.UpdateAll(); err != nil {
@@ -101,11 +97,7 @@ func (u *Updater) Reconfigure(autoUpdate bool, cronExpr string, geositeURL strin
 	u.cfg.AdFilterBackupURL = adFilterBackupURL
 
 	if autoUpdate && cronExpr != "" {
-		loc, locErr := time.LoadLocation("Asia/Shanghai")
-		if locErr != nil || loc == nil {
-			loc = time.UTC
-		}
-		u.cron = cron.New(cron.WithLocation(loc))
+		u.cron = cron.New(cron.WithLocation(time.Local))
 		_, err := u.cron.AddFunc(cronExpr, func() {
 			xlog.Info("scheduled GeoIP/GeoSite update started")
 			if err := u.UpdateAll(); err != nil {
@@ -176,7 +168,7 @@ func (u *Updater) updateWithFailover(target string, urls []string, destPath stri
 			Target:    target,
 			Status:    "failed",
 			Message:   err.Error(),
-			Timestamp: time.Now().UTC(),
+			Timestamp: time.Now(),
 		})
 		return err
 	}
@@ -207,7 +199,7 @@ func (u *Updater) updateWithFailover(target string, urls []string, destPath stri
 				URL:       url,
 				Status:    "failed",
 				Message:   fmt.Sprintf("源 %d/%d 失败: %v", i+1, totalSources, err),
-				Timestamp: time.Now().UTC(),
+				Timestamp: time.Now(),
 				Duration:  time.Since(startTime).Milliseconds(),
 			})
 
@@ -235,7 +227,7 @@ func (u *Updater) updateWithFailover(target string, urls []string, destPath stri
 				URL:       url,
 				Status:    "failed",
 				Message:   fmt.Sprintf("加载失败: %v", err),
-				Timestamp: time.Now().UTC(),
+				Timestamp: time.Now(),
 				Duration:  time.Since(startTime).Milliseconds(),
 			})
 
@@ -251,7 +243,7 @@ func (u *Updater) updateWithFailover(target string, urls []string, destPath stri
 			URL:       url,
 			Status:    "success",
 			Message:   fmt.Sprintf("成功 (源 %d/%d)", i+1, totalSources),
-			Timestamp: time.Now().UTC(),
+			Timestamp: time.Now(),
 			Duration:  time.Since(startTime).Milliseconds(),
 		})
 

@@ -1,6 +1,7 @@
 dist/
 *.exe
 *.tmp
+*.run
 cookies.txt
 node_modules/
 package-lock.json
@@ -8,5 +9,9 @@ lookup2.json
 lookup3.json
 *.docx
 docx_content.txt
-VLvw0Z9QwJQFPNs1rWKTOlZCnjf9jIYhnJCKRTD4.tmp
+*.tmp
 test-*.json
+build-binaries.bat
+build-run.ps1
+LynxDNS_vs_mosdns_*.md
+LynxDNS_需求验证清单.md

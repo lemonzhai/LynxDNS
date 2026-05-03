@@ -313,19 +313,87 @@ function api_log_read()
 
 	local content = fs.readfile(log_file)
 
-	if not content or content == "" then
-		local handle = io.popen("logread -e lynxdns 2>/dev/null | tail -n " .. tostring(lines))
-		if handle then
-			content = handle:read("*a")
-			handle:close()
+	-- Check if logs were recently cleared
+	local cleared_marker = "/var/log/lynxdns.cleared"
+	local cleared_time = 0
+	if fs.access(cleared_marker) then
+		local marker_content = fs.readfile(cleared_marker)
+		if marker_content and marker_content ~= "" then
+			cleared_time = tonumber(marker_content) or 0
 		end
 	end
 
 	if not content or content == "" then
-		local handle = io.popen("logread 2>/dev/null | grep -i lynxdns | tail -n " .. tostring(lines))
-		if handle then
-			content = handle:read("*a")
-			handle:close()
+		-- Only use syslog fallback if no recent clear, or filter by timestamp
+		local handle
+		if cleared_time > 0 then
+			-- Get current syslog, then filter by timestamp (logs newer than cleared_time)
+			handle = io.popen("logread -e lynxdns 2>/dev/null")
+			if handle then
+				local syslog_content = handle:read("*a")
+				handle:close()
+				-- Filter logs: keep only entries after the cleared timestamp
+				local filtered_lines = {}
+				for line in syslog_content:gmatch("[^\n]+") do
+					-- OpenWrt log format: "Mon Jan 2 15:04:05 2026 daemon.info lynxdns[123]: message"
+					-- Try to extract timestamp and compare
+					local log_time = parse_logread_timestamp(line)
+					if log_time == 0 or log_time > cleared_time then
+						filtered_lines[#filtered_lines + 1] = line
+					end
+				end
+				if #filtered_lines > 0 then
+					-- Take only the last N lines
+					local start_idx = math.max(1, #filtered_lines - lines + 1)
+					content = ""
+					for i = start_idx, #filtered_lines do
+						content = content .. filtered_lines[i] .. "\n"
+					end
+				else
+					content = ""
+				end
+			end
+		else
+			handle = io.popen("logread -e lynxdns 2>/dev/null | tail -n " .. tostring(lines))
+			if handle then
+				content = handle:read("*a")
+				handle:close()
+			end
+		end
+	end
+
+	if not content or content == "" then
+		local handle
+		if cleared_time > 0 then
+			handle = io.popen("logread 2>/dev/null")
+			if handle then
+				local syslog_content = handle:read("*a")
+				handle:close()
+				local filtered_lines = {}
+				for line in syslog_content:gmatch("[^\n]+") do
+					if line:lower():find("lynxdns") then
+						local log_time = parse_logread_timestamp(line)
+						if log_time == 0 or log_time > cleared_time then
+							filtered_lines[#filtered_lines + 1] = line
+						end
+					end
+				end
+				if #filtered_lines > 0 then
+					local start_idx = math.max(1, #filtered_lines - lines + 1)
+					content = ""
+					for i = start_idx, #filtered_lines do
+						content = content .. filtered_lines[i] .. "\n"
+					end
+				else
+					content = ""
+				end
+			end
+		else
+			handle = io.popen("logread 2>/dev/null | grep -i lynxdns | tail -n " .. tostring(lines))
+			if handle then
+				content = handle:read("*a")
+				handle:close()
+			end
 		end
 	end
 
@@ -355,6 +423,66 @@ function api_log_read()
 			total = total
 		}
 	})
+end
+
+-- Parse logread timestamp and return Unix timestamp
+-- OpenWrt logread format: "Mon Jan 2 15:04:05 2026 daemon.info lynxdns[123]: message"
+function parse_logread_timestamp(line)
+	-- Match the date/time prefix pattern
+	local month_map = {
+		Jan = 1, Feb = 2, Mar = 3, Apr = 4, May = 5, Jun = 6,
+		Jul = 7, Aug = 8, Sep = 9, Oct = 10, Nov = 11, Dec = 12
+	}
+
+	-- Pattern: "Mon Jan  2 15:04:05 2026"
+	local weekday, month_str, day, time_str, year = line:match("^(%a%a%a)%s+(%a%a%a)%s+(%d+)%s+(%d%d:%d%d:%d%d)%s+(%d%d%d%d)")
+	if not weekday or not month_str then
+		return 0
+	end
+
+	local month = month_map[month_str]
+	if not month then
+		return 0
+	end
+
+	local hour, min, sec = time_str:match("(%d%d):(%d%d):(%d%d)")
+	if not hour then
+		return 0
+	end
+
+	-- Convert to Unix timestamp (simple approximation, ignoring timezone)
+	-- This is good enough for relative comparison (before/after clear)
+	local year_num = tonumber(year) or 2026
+	local day_num = tonumber(day) or 1
+	local hour_num = tonumber(hour) or 0
+	local min_num = tonumber(min) or 0
+	local sec_num = tonumber(sec) or 0
+
+	-- Simple Unix timestamp calculation
+	local days = 0
+	for y = 1970, year_num - 1 do
+		if (y % 4 == 0 and y % 100 ~= 0) or (y % 400 == 0) then
+			days = days + 366
+		else
+			days = days + 365
+		end
+	end
+	for m = 1, month - 1 do
+		if m == 2 then
+			if (year_num % 4 == 0 and year_num % 100 ~= 0) or (year_num % 400 == 0) then
+				days = days + 29
+			else
+				days = days + 28
+			end
+		elseif m == 4 or m == 6 or m == 9 or m == 11 then
+			days = days + 30
+		else
+			days = days + 31
+		end
+	end
+	days = days + day_num - 1
+
+	return days * 86400 + hour_num * 3600 + min_num * 60 + sec_num
 end
 
 function api_ws_config()
@@ -422,12 +550,22 @@ function api_log_clear()
 		local log_file = get_log_file_path()
 		local fs = require "nixio.fs"
 
+		-- Clear the log file
 		if fs.access(log_file) then
 			local f = io.open(log_file, "w")
 			if f then f:close() end
 		end
 
-		json_response({ code = 0, message = "success", data = { cleared = true } })
+		-- Write cleared timestamp marker to filter syslog fallback
+		local cleared_marker = "/var/log/lynxdns.cleared"
+		local current_time = os.time()
+		local marker_file = io.open(cleared_marker, "w")
+		if marker_file then
+			marker_file:write(tostring(current_time))
+			marker_file:close()
+		end
+
+		json_response({ code = 0, message = "success", data = { cleared = true, cleared_at = current_time } })
 	else
 		http.status(405, "Method Not Allowed")
 		json_response({ code = 405, message = "method not allowed" })

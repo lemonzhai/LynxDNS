@@ -115,7 +115,7 @@ func (m *Manager) LoadGeosite(path string) error {
 	m.geosite = matcher
 	m.geositeStatus.Loaded = true
 	m.geositeStatus.SizeBytes = info.Size()
-	m.geositeStatus.LastUpdate = time.Now().UTC()
+	m.geositeStatus.LastUpdate = time.Now()
 	m.geositeStatus.Version = info.ModTime().Format("2006010215")
 	m.geositeStatus.CategoriesCount = len(matcher.domains)
 	totalEntries := 0
@@ -153,7 +153,7 @@ func (m *Manager) LoadGeoip(path string) error {
 	m.geoip = matcher
 	m.geoipStatus.Loaded = true
 	m.geoipStatus.SizeBytes = info.Size()
-	m.geoipStatus.LastUpdate = time.Now().UTC()
+	m.geoipStatus.LastUpdate = time.Now()
 	m.geoipStatus.Version = info.ModTime().Format("2006010215")
 	m.geoipStatus.CategoriesCount = len(matcher.cidrs)
 	totalEntries := 0
@@ -186,7 +186,7 @@ func (m *Manager) LoadAdFilter(path string) error {
 
 	m.adFilter = matcher
 	m.adFilterStatus.Loaded = true
-	m.adFilterStatus.LastUpdate = time.Now().UTC()
+	m.adFilterStatus.LastUpdate = time.Now()
 	m.adFilterStatus.RuleCount = len(domains)
 
 	xlog.Info("Ad filter loaded: %d rules from %s", len(domains), path)

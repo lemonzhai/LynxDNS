@@ -9,6 +9,8 @@ import (
 	"os/signal"
 	"path/filepath"
 	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -36,10 +38,45 @@ var (
 )
 
 func init() {
-	loc, err := time.LoadLocation("Local")
-	if err != nil || loc == nil {
-		time.Local = time.UTC
+	// On OpenWrt, Go's time.Local defaults to UTC because there's no /etc/localtime or zoneinfo.
+	// Read /etc/TZ (OpenWrt's timezone file, e.g. "CST-8" meaning UTC+8) and override time.Local.
+	// NOTE: We cannot use time.LoadLocation("Local") because Go caches the local timezone
+	// in sync.Once — it won't re-read after we change the TZ env var.
+	if tzData, err := os.ReadFile("/etc/TZ"); err == nil {
+		tzStr := strings.TrimSpace(string(tzData))
+		if tzStr != "" {
+			if offset := parseTZOffset(tzStr); offset != nil {
+				time.Local = time.FixedZone("Local", *offset)
+			}
+		}
 	}
+}
+
+// parseTZOffset parses OpenWrt /etc/TZ format like "CST-8" (UTC+8) or "GMT+5" (UTC-5)
+func parseTZOffset(tz string) *int {
+	// OpenWrt /etc/TZ format: "NAME[+|-]HOURS[:MINUTES]"
+	// Note: POSIX convention is inverted: "CST-8" means 8 hours EAST of UTC (UTC+8)
+	for i := len(tz) - 1; i >= 0; i-- {
+		if tz[i] == '+' || tz[i] == '-' {
+			sign := tz[i]
+			offsetStr := tz[i+1:]
+			var hours, minutes int
+			parts := strings.SplitN(offsetStr, ":", 2)
+			hours, _ = strconv.Atoi(parts[0])
+			if len(parts) > 1 {
+				minutes, _ = strconv.Atoi(parts[1])
+			}
+			totalSeconds := hours*3600 + minutes*60
+			// POSIX convention: CST-8 means UTC+8 (sign is inverted)
+			if sign == '-' {
+				seconds := totalSeconds
+				return &seconds
+			}
+			negSeconds := -totalSeconds
+			return &negSeconds
+		}
+	}
+	return nil
 }
 
 func main() {
@@ -51,6 +88,7 @@ func main() {
 	}
 
 	xlog.Info("LynxDNS v%s starting...", version)
+	xlog.Info("timezone: %s (now: %s)", time.Local.String(), time.Now().Format("2006-01-02 15:04:05 MST"))
 
 	cfgMgr := config.NewManager(*configPath)
 	if err := cfgMgr.Load(); err != nil {

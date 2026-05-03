@@ -68,11 +68,11 @@ return view.extend({
 		var priorityInfo = E('div', { 'class': 'priority-info', 'style': 'margin-top:20px' }, [
 			E('strong', {}, '规则优先级（从高到低）：'),
 			E('ol', {}, [
-				E('li', {}, E('strong', { 'class': 'priority-color-remote' }, '自定义规则') + '（本页面） - 最高优先级'),
-				E('li', {}, E('span', { 'class': 'priority-color-adblock' }, '广告过滤规则') + ' - 广告拦截分类'),
-				E('li', {}, E('span', { 'class': 'priority-color-geosite' }, 'GeoSite 规则') + ' - 基于域名的路由'),
-				E('li', {}, E('span', { 'class': 'priority-color-geoip' }, 'GeoIP 规则') + ' - 基于 IP 的路由'),
-				E('li', {}, E('span', { 'class': 'priority-color-default' }, '默认策略') + ' - 最低优先级回退')
+				E('li', {}, [E('strong', { 'class': 'priority-color-remote' }, '自定义规则'), '（本页面） - 最高优先级']),
+				E('li', {}, [E('span', { 'class': 'priority-color-adblock' }, '广告过滤规则'), ' - 广告拦截分类']),
+				E('li', {}, [E('span', { 'class': 'priority-color-geosite' }, 'GeoSite 规则'), ' - 基于域名的路由']),
+				E('li', {}, [E('span', { 'class': 'priority-color-geoip' }, 'GeoIP 规则'), ' - 基于 IP 的路由']),
+				E('li', {}, [E('span', { 'class': 'priority-color-default' }, '默认策略'), ' - 最低优先级回退'])
 			])
 		]);
 		m.appendChild(priorityInfo);
@@ -105,18 +105,23 @@ return view.extend({
 				return;
 			}
 
-			var table = E('table', { 'class': 'table', 'style': 'width:100%' }, [
-				E('thead', {}, [
-					E('tr', {}, [
-						E('th', { 'style': 'width:40px' }, '#'),
-						E('th', {}, '类型'),
-						E('th', {}, '域名'),
-						E('th', {}, '目标'),
-						E('th', { 'style': 'width:80px' }, '启用'),
-						E('th', { 'style': 'width:120px' }, '操作')
-					])
+			var table = E('table', { 'class': 'table', 'style': 'width:100%' });
+			var thead = E('thead', {}, [
+				E('tr', {}, [
+					E('th', { 'style': 'width:5%' }, '#'),
+					E('th', { 'style': 'width:11%' }, '类型'),
+					E('th', { 'style': 'width:37%' }, '域名'),
+					E('th', { 'style': 'width:21%' }, '目标'),
+					E('th', { 'style': 'width:8%;text-align:center' }, '启用'),
+					E('th', { 'style': 'width:18%' }, '操作')
 				])
 			]);
+			table.appendChild(thead);
+
+			var colWidths = ['5%', '11%', '37%', '21%', '8%', '18%'];
+			thead.querySelectorAll('th').forEach(function(th, i) {
+				th.style.width = colWidths[i];
+			});
 
 			var tbody = E('tbody');
 			rules.forEach(function(rule, idx) {
@@ -124,14 +129,14 @@ return view.extend({
 				var editBtn = E('button', {
 					'class': 'cbi-button cbi-button-edit',
 					'type': 'button',
-					'style': 'margin-right:4px'
+					'style': 'margin-right:4px;font-size:11px;padding:2px 6px'
 				}, '编辑');
 				editBtn.addEventListener('click', function() { showRuleModal(rule, refreshTable); });
 
 				var deleteBtn = E('button', {
 					'class': 'cbi-button btn-rule-delete',
 					'type': 'button',
-					'style': 'margin-right:4px'
+					'style': 'margin-right:4px;font-size:11px;padding:2px 6px'
 				}, '删除');
 				deleteBtn.addEventListener('click', function(ev) {
 					ev.preventDefault();
@@ -143,13 +148,12 @@ return view.extend({
 
 				var tr = E('tr', {}, [
 					E('td', {}, String(idx + 1)),
-					E('td', {}, E('span', {
-						'style': 'padding:2px 8px;border-radius:3px;font-size:12px;' +
-							'background:' + getTypeColor(rule.type) + ';color:#fff'
+					E('td', { 'class': 'type-cell' }, E('span', {
+						'style': 'background:' + getTypeColor(rule.type) + ';color:#fff'
 					}, typeLabel)),
-					E('td', { 'style': 'word-break:break-all' }, rule.domain),
+					E('td', { 'class': 'word-break' }, rule.domain),
 					E('td', {}, rule.target || '-'),
-					E('td', {}, createInlineToggle(rule)),
+					E('td', { 'class': 'center' }, createInlineToggle(rule)),
 					E('td', {}, [editBtn, deleteBtn])
 				]);
 				tbody.appendChild(tr);

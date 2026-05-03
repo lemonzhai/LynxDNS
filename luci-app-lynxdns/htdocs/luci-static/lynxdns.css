@@ -4,7 +4,8 @@
 
 .cbi-value-field .cbi-input-text,
 .cbi-value-field .cbi-input-select {
-	width: 250px !important;
+	width: 300px !important;
+	min-width: 200px !important;
 	max-width: 100% !important;
 	box-sizing: border-box;
 }
@@ -93,16 +94,83 @@
 
 .table {
 	width: 100%;
+	display: table;
 	table-layout: fixed;
-	border-collapse: collapse;
+	border-spacing: 0;
+	background: #fff;
 }
 
-.table td, .table th {
-	padding: 6px 10px;
+.table thead {
+	display: table-header-group;
+}
+
+.table tbody {
+	display: table-row-group;
+}
+
+.table tr {
+	display: table-row;
+}
+
+.table th {
+	padding: 8px 10px;
 	text-align: left;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
+	border-bottom: 1px solid #e0e0e0;
+	border-right: 1px solid #e0e0e0;
+	background: #f8f8f8;
+	font-weight: bold;
+	vertical-align: middle;
+}
+
+.table td {
+	padding: 8px 10px;
+	text-align: left;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+	border-bottom: 1px solid #e0e0e0;
+	border-right: 1px solid #e0e0e0;
+	vertical-align: middle;
+}
+
+.table td.nowrap {
+	white-space: nowrap;
+}
+
+.table td.center {
+	text-align: center;
+	vertical-align: middle;
+}
+
+.table td.center input[type=checkbox] {
+	margin: 0;
+}
+
+.table td.type-cell span {
+	display: inline-block;
+	padding: 2px 8px;
+	border-radius: 3px;
+	font-size: 12px;
+	white-space: nowrap;
+	max-width: 100%;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	line-height: 1.4;
+	box-sizing: border-box;
+}
+
+.table td.type-cell {
+	text-align: center;
+}
+
+.table td.word-break {
+	overflow-wrap: break-word;
+	word-break: break-all;
+	white-space: normal;
+	overflow: hidden;
 }
 
 .cbi-value-description {
@@ -142,20 +210,21 @@
 
 .domain-format-help {
 	font-size: 14px;
-	color: #fff;
-	margin-top: 8px;
+	color: inherit;
+	margin-top: 6px;
 	line-height: 1.6;
-	padding: 8px 12px;
-	background: rgba(255, 255, 255, 0.1);
-	border-radius: 4px;
+	padding: 6px 10px;
+	background: var(--lynxdns-info-bg, #f5f5f5);
+	border: 1px solid var(--lynxdns-info-border, #ddd);
+	border-radius: 3px;
 }
 
 .domain-format-help code {
-	background: rgba(255, 255, 255, 0.2);
-	padding: 2px 6px;
-	border-radius: 3px;
-	font-size: 13px;
-	color: #fff;
+	background: var(--lynxdns-code-bg, rgba(0, 0, 0, 0.05));
+	padding: 1px 4px;
+	border-radius: 2px;
+	font-size: 14px;
+	color: inherit;
 }
 
 .ws-status {
@@ -326,48 +395,23 @@
 
 :root {
 	--lynxdns-modal-bg: #fff;
-	--lynxdns-modal-border: #e0e0e0;
-	--lynxdns-modal-shadow: rgba(0, 0, 0, 0.3);
-	--lynxdns-modal-overlay: rgba(0, 0, 0, 0.5);
+	--lynxdns-modal-border: #ccc;
+	--lynxdns-modal-overlay: rgba(0, 0, 0, 0.4);
 	--lynxdns-modal-title: #333;
-	--lynxdns-modal-text: #333;
 	--lynxdns-modal-label: #666;
 	--lynxdns-input-bg: #fff;
 	--lynxdns-input-border: #ccc;
 	--lynxdns-input-text: #333;
+	--lynxdns-input-placeholder: #999;
 	--lynxdns-input-focus-border: #4a90d9;
 	--lynxdns-btn-cancel-bg: #f5f5f5;
 	--lynxdns-btn-cancel-border: #ccc;
 	--lynxdns-btn-cancel-text: #333;
-	--lynxdns-btn-cancel-hover-bg: #e0e0e0;
+	--lynxdns-btn-cancel-hover-bg: #e8e8e8;
 	--lynxdns-btn-save-bg: #4a90d9;
 	--lynxdns-btn-save-hover-bg: #3a7bc8;
 	--lynxdns-btn-delete-bg: #f44336;
 	--lynxdns-btn-delete-hover-bg: #d32f2f;
-}
-
-@media (prefers-color-scheme: dark) {
-	:root {
-		--lynxdns-modal-bg: #2d2d2d;
-		--lynxdns-modal-border: #444;
-		--lynxdns-modal-shadow: rgba(0, 0, 0, 0.5);
-		--lynxdns-modal-overlay: rgba(0, 0, 0, 0.7);
-		--lynxdns-modal-title: #e0e0e0;
-		--lynxdns-modal-text: #e0e0e0;
-		--lynxdns-modal-label: #9e9e9e;
-		--lynxdns-input-bg: #3a3a3a;
-		--lynxdns-input-border: #555;
-		--lynxdns-input-text: #e0e0e0;
-		--lynxdns-input-focus-border: #64B5F6;
-		--lynxdns-btn-cancel-bg: #3a3a3a;
-		--lynxdns-btn-cancel-border: #555;
-		--lynxdns-btn-cancel-text: #e0e0e0;
-		--lynxdns-btn-cancel-hover-bg: #4a4a4a;
-		--lynxdns-btn-save-bg: #2196F3;
-		--lynxdns-btn-save-hover-bg: #1976D2;
-		--lynxdns-btn-delete-bg: #e53935;
-		--lynxdns-btn-delete-hover-bg: #c62828;
-	}
 }
 
 .lynxdns-modal-overlay {
@@ -380,31 +424,80 @@
 	display: flex;
 	align-items: center;
 	justify-content: center;
-	z-index: 1000;
+	z-index: 1050;
 }
 
 .lynxdns-modal-content {
 	background: var(--lynxdns-modal-bg);
 	border: 1px solid var(--lynxdns-modal-border);
-	border-radius: 8px;
-	padding: 20px;
+	border-radius: 3px;
+	padding: 16px;
 	min-width: 400px;
 	max-width: 550px;
-	box-shadow: 0 4px 20px var(--lynxdns-modal-shadow);
+	width: 100%;
+	box-shadow: 0 4px 16px rgba(0, 0, 0, 0.15);
 }
 
 .lynxdns-modal-title {
-	margin: 0 0 16px 0;
-	font-size: 18px;
-	font-weight: 600;
+	margin: 0 0 14px 0;
+	font-size: 16px;
+	font-weight: bold;
 	color: var(--lynxdns-modal-title);
+}
+
+.lynxdns-modal-content .cbi-value {
+	margin-bottom: 14px;
+	display: flex;
+	align-items: flex-start;
+}
+
+.lynxdns-modal-content .cbi-value-title {
+	color: var(--lynxdns-modal-label);
+	display: block;
+	margin-bottom: 0;
+	padding-top: 5px;
+	font-size: 13px;
+	font-weight: normal;
+	width: 130px;
+	flex-shrink: 0;
+}
+
+.lynxdns-modal-content .cbi-value-field {
+	width: 100%;
+	flex: 1;
+}
+
+.lynxdns-modal-content .cbi-input-text,
+.lynxdns-modal-content .cbi-input-select {
+	background: var(--lynxdns-input-bg);
+	border: 1px solid var(--lynxdns-input-border);
+	color: var(--lynxdns-input-text);
+	width: 100%;
+	padding: 6px 8px;
+	font-size: 13px;
+	border-radius: 3px;
+	box-sizing: border-box;
+}
+
+.lynxdns-modal-content .cbi-input-text:focus,
+.lynxdns-modal-content .cbi-input-select:focus {
+	border-color: var(--lynxdns-input-focus-border);
+	outline: none;
+}
+
+.lynxdns-modal-content .cbi-input-text::placeholder {
+	color: var(--lynxdns-input-placeholder);
+}
+
+.lynxdns-modal-content .cbi-input-checkbox {
+	accent-color: var(--lynxdns-btn-save-bg);
 }
 
 .lynxdns-modal-btn-row {
 	display: flex;
 	gap: 8px;
 	justify-content: flex-end;
-	margin-top: 15px;
+	margin-top: 14px;
 }
 
 .lynxdns-modal-btn-row .cbi-button {
@@ -440,44 +533,6 @@
 
 .btn-rule-delete:hover {
 	background: var(--lynxdns-btn-delete-hover-bg) !important;
-}
-
-.lynxdns-modal-content .cbi-value-title {
-	color: var(--lynxdns-modal-label);
-	display: block;
-	margin-bottom: 6px;
-	font-size: 14px;
-	font-weight: 500;
-}
-
-.lynxdns-modal-content .cbi-value {
-	margin-bottom: 16px;
-}
-
-.lynxdns-modal-content .cbi-value-field {
-	width: 100%;
-}
-
-.lynxdns-modal-content .cbi-input-text,
-.lynxdns-modal-content .cbi-input-select {
-	background: var(--lynxdns-input-bg);
-	border: 1px solid var(--lynxdns-input-border);
-	color: var(--lynxdns-input-text);
-	width: 100%;
-	padding: 8px 12px;
-	font-size: 14px;
-	border-radius: 4px;
-	box-sizing: border-box;
-}
-
-.lynxdns-modal-content .cbi-input-text:focus,
-.lynxdns-modal-content .cbi-input-select:focus {
-	border-color: var(--lynxdns-input-focus-border);
-	outline: none;
-}
-
-.lynxdns-modal-content .cbi-input-checkbox {
-	accent-color: var(--lynxdns-btn-save-bg);
 }
 
 @media (max-width: 600px) {

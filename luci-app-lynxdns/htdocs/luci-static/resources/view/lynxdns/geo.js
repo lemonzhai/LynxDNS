@@ -580,14 +580,14 @@ return view.extend({
 					return;
 				}
 
-				var html = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-				html += '<tr style="border-bottom:2px solid #ddd;font-weight:bold">';
-				html += '<th style="text-align:left;padding:8px 6px">时间</th>';
-				html += '<th style="text-align:left;padding:8px 6px">目标</th>';
-				html += '<th style="text-align:left;padding:8px 6px">状态</th>';
-				html += '<th style="text-align:left;padding:8px 6px">源地址</th>';
-				html += '<th style="text-align:left;padding:8px 6px">耗时</th>';
-				html += '<th style="text-align:left;padding:8px 6px">说明</th>';
+				var html = '<table class="table" style="width:100%;table-layout:fixed;font-size:12px">';
+				html += '<tr>';
+				html += '<th>时间</th>';
+				html += '<th>目标</th>';
+				html += '<th>状态</th>';
+				html += '<th>源地址</th>';
+				html += '<th>耗时</th>';
+				html += '<th>说明</th>';
 				html += '</tr>';
 
 				resp.data.history.reverse().forEach(function(entry) {
@@ -600,13 +600,13 @@ return view.extend({
 
 					var targetName = { geosite: 'GeoSite', geoip: 'GeoIP', ad_filter: '广告过滤' }[entry.target] || entry.target;
 
-					html += '<tr style="border-bottom:1px solid #eee">';
-					html += '<td style="padding:8px 6px;white-space:nowrap">' + formatDate(entry.timestamp) + '</td>';
-					html += '<td style="padding:8px 6px">' + targetName + '</td>';
-					html += '<td style="padding:8px 6px">' + statusIcon + ' ' + entry.status + '</td>';
-					html += '<td style="padding:8px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + (entry.url || '') + '">' + (entry.url || '-') + '</td>';
-					html += '<td style="padding:8px 6px">' + formatDuration(entry.duration_ms) + '</td>';
-					html += '<td style="padding:8px 6px">' + (entry.message || '') + '</td>';
+					html += '<tr>';
+					html += '<td class="nowrap">' + formatDate(entry.timestamp) + '</td>';
+					html += '<td>' + targetName + '</td>';
+					html += '<td>' + statusIcon + ' ' + entry.status + '</td>';
+					html += '<td class="word-break" title="' + (entry.url || '') + '">' + (entry.url || '-') + '</td>';
+					html += '<td>' + formatDuration(entry.duration_ms) + '</td>';
+					html += '<td class="word-break">' + (entry.message || '') + '</td>';
 					html += '</tr>';
 				});
 
