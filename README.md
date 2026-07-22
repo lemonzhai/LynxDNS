@@ -49,10 +49,10 @@
 
 ```bash
 # 下载安装包
-wget https://github.com/lemonzhai/LynxDNS/releases/latest/download/lynxdns_1.0.3_x86_64_luci.run
+wget https://github.com/lemonzhai/LynxDNS/releases/latest/download/lynxdns_1.0.3_all_luci.run
 
 # 执行安装（自动检测架构）
-sh lynxdns_1.0.3_x86_64_luci.run
+sh lynxdns_1.0.3_all_luci.run
 ```
 
 安装完成后，访问 `http://路由器IP/cgi-bin/luci/admin/services/lynxdns` 即可使用。
