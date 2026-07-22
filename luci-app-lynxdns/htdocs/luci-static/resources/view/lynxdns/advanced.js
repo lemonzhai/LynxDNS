@@ -4,7 +4,7 @@
 'require uci';
 
 var apiBase;
-var concurrencyInput, idleTimeoutInput, cacheSizeInput, leakModeSelect, logLevelSelect, logFileInput, retentionSelect;
+var concurrencyInput, idleTimeoutInput, cacheSizeInput, leakModeSelect, logLevelSelect, logFileInput, retentionSelect, queryLevelSelect, cacheLogIntervalInput, logMaxSizeInput;
 var listenAddrInput, listenPortInput, apiAddrInput, apiPortInput, apiSecretInput;
 
 function apiCall(method, path, data) {
@@ -162,8 +162,13 @@ return view.extend({
 			E('option', { 'value': 'loose' }, '宽松模式')
 		]);
 		leakModeSelect.value = leak.mode || 'loose';
-		section.appendChild(fieldRow('防护模式', leakModeSelect,
-			'标准模式：匹配国外 → 远程 DNS，匹配国内 → 国内 DNS，未匹配任何 → 远程 DNS。严格模式：匹配国外 → 远程 DNS，匹配国内 → 国内 DNS，未匹配任何 → 拦截 (NXDOMAIN)。宽松模式：匹配国外 → 远程 DNS，匹配国内 → 国内 DNS，未匹配任何 → 默认 DNS'));
+		var leakDesc = E('div', { 'class': 'cbi-value-description' });
+		leakDesc.innerHTML = '标准模式：匹配国外 → 远程 DNS，匹配国内 → 国内 DNS，未匹配任何 → 远程 DNS。<br>严格模式：匹配国外 → 远程 DNS，匹配国内 → 国内 DNS，未匹配任何 → 拦截 (NXDOMAIN)。<br>宽松模式：匹配国内 → 国内 DNS，匹配国外 → 远程 DNS，未匹配任何 → 默认 DNS';
+		var leakChildren = [leakModeSelect, leakDesc];
+		section.appendChild(E('div', { 'class': 'cbi-value' }, [
+			E('label', { 'class': 'cbi-value-title' }, '防护模式'),
+			E('div', { 'class': 'cbi-value-field' }, leakChildren)
+		]));
 
 		var apiFieldset = E('fieldset', { 'class': 'cbi-section', 'style': 'margin-bottom:16px' }, [
 			E('legend', {}, 'API 接口设置'),
@@ -197,7 +202,24 @@ return view.extend({
 		]);
 		logLevelSelect.value = ['debug', 'info', 'warn', 'error'].indexOf(log.level) >= 0 ? log.level : 'info';
 		section.appendChild(fieldRow('日志级别', logLevelSelect,
-			'日志输出的详细程度。Debug 输出最详细，Error 仅输出错误信息。'));
+			'系统日志输出的详细程度。Debug 输出最详细，Error 仅输出错误信息。'));
+
+		queryLevelSelect = E('select', { 'class': 'cbi-input-select' }, [
+			E('option', { 'value': 'off' }, '关闭（不输出查询日志）'),
+			E('option', { 'value': 'info' }, '信息（输出所有查询日志）'),
+			E('option', { 'value': 'debug' }, '调试（输出详细调试信息）')
+		]);
+		queryLevelSelect.value = ['off', 'info', 'debug'].indexOf(log.query_level) >= 0 ? log.query_level : 'info';
+		section.appendChild(fieldRow('查询日志级别', queryLevelSelect,
+			'DNS 查询日志的独立控制。关闭后不再输出查询日志到终端和文件，可显著降低长时间运行的性能开销。'));
+
+		cacheLogIntervalInput = E('input', {
+			'type': 'number', 'class': 'cbi-input-text',
+			'value': log.cache_log_interval || 0,
+			'min': '0', 'max': '3600'
+		});
+		section.appendChild(fieldRow('缓存命中日志限流 (秒)', cacheLogIntervalInput,
+			'同一域名同一类型的缓存命中日志在指定秒数内仅记录首次。0 表示不限流。建议设为 10-60 秒以大幅减少日志量。'));
 
 		retentionSelect = E('select', { 'class': 'cbi-input-select' }, [
 			E('option', { 'value': '3600' }, '1 小时'),
@@ -219,6 +241,14 @@ return view.extend({
 		});
 		section.appendChild(fieldRow('日志文件路径', logFileInput,
 			'日志文件的保存路径。默认：/var/log/lynxdns.log'));
+
+		logMaxSizeInput = E('input', {
+			'type': 'number', 'class': 'cbi-input-text',
+			'value': log.max_size || 10,
+			'min': '0', 'max': '1024'
+		});
+		section.appendChild(fieldRow('日志文件大小限制 (MB)', logMaxSizeInput,
+			'日志文件超过此大小后自动轮转（旧文件重命名为 .1 后缀）。0 表示不轮转，默认 10MB。'));
 
 		var reloadBtn = E('button', {
 			'class': 'cbi-button cbi-button-apply',
@@ -266,7 +296,10 @@ return view.extend({
 			},
 			log: {
 				level: logLevelSelect.value,
-				file: logFileInput.value || '/var/log/lynxdns.log'
+				file: logFileInput.value || '/var/log/lynxdns.log',
+				query_level: queryLevelSelect.value,
+				cache_log_interval: parseInt(cacheLogIntervalInput.value) || 0,
+				max_size: parseInt(logMaxSizeInput.value) || 10
 			}
 		};
 		apiPatch('/config', patchData).then(function(resp) {

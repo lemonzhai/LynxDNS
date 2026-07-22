@@ -76,8 +76,11 @@ type RoutingConfig struct {
 }
 
 type LogConfig struct {
-	Level string `yaml:"level" json:"level"`
-	File  string `yaml:"file" json:"file"`
+	Level             string `yaml:"level" json:"level"`
+	File              string `yaml:"file" json:"file"`
+	QueryLevel        string `yaml:"query_level" json:"query_level"`
+	CacheLogInterval  int    `yaml:"cache_log_interval" json:"cache_log_interval"`
+	MaxSize           int    `yaml:"max_size" json:"max_size"`
 }
 
 type FullConfig struct {
@@ -153,7 +156,7 @@ func DefaultConfig() *FullConfig {
 		Routing: RoutingConfig{
 			Geosite: RoutingGroup{
 				Remote:   []string{"geolocation-!cn", "google", "github", "gfw"},
-				Domestic: []string{"cn"},
+				Domestic: []string{"cn", "apple-cn", "google-cn"},
 				AdFilter: []string{"category-ads-all"},
 			},
 			Geoip: RoutingGroup{
@@ -161,8 +164,11 @@ func DefaultConfig() *FullConfig {
 			},
 		},
 		Log: LogConfig{
-			Level: "info",
-			File:  "/var/log/lynxdns.log",
+			Level:            "info",
+			File:             "/var/log/lynxdns.log",
+			QueryLevel:       "info",
+			CacheLogInterval: 0,
+			MaxSize:          10,
 		},
 	}
 }

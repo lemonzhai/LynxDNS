@@ -3,6 +3,7 @@ package resolver
 import (
 	"context"
 	"fmt"
+	"net"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -20,12 +21,15 @@ import (
 type Action string
 
 const (
-	ActionCacheHit  Action = "cache_hit"
-	ActionDomestic  Action = "domestic"
-	ActionRemote    Action = "remote"
-	ActionBlocked   Action = "blocked"
-	ActionRedirect  Action = "redirected"
-	ActionDefault   Action = "default"
+	ActionCacheHit   Action = "cache_hit"
+	ActionDomestic   Action = "domestic"
+	ActionRemote     Action = "remote"
+	ActionAdBlock    Action = "ad_block"
+	ActionLeakBlock  Action = "leak_block"
+	ActionRuleBlock  Action = "rule_block"
+	ActionRedirect   Action = "redirected"
+	ActionDefault    Action = "default"
+	ActionFailed     Action = "failed"
 )
 
 type QueryLog struct {
@@ -68,6 +72,11 @@ var localDomainSuffixes = []string{
 	".arpa",
 }
 
+type queryLogCfg struct {
+	queryLevel       string
+	cacheLogInterval int
+}
+
 type Resolver struct {
 	mu          sync.RWMutex
 	cfg         *config.FullConfig
@@ -91,6 +100,9 @@ type Resolver struct {
 
 	queryHistory []*QueryLog
 	histMu       sync.Mutex
+
+	queryLogConfig   atomic.Value
+	cacheLogTimes    sync.Map
 }
 
 func New(cfg *config.FullConfig, client *xclient.DNSClient, cache *xcache.DNSCache, ruleEngine *rules.Engine, geoMgr *geodata.Manager) *Resolver {
@@ -102,6 +114,10 @@ func New(cfg *config.FullConfig, client *xclient.DNSClient, cache *xcache.DNSCac
 		geoManager: geoMgr,
 		startTime:  time.Now(),
 	}
+	r.queryLogConfig.Store(queryLogCfg{
+		queryLevel:       cfg.Log.QueryLevel,
+		cacheLogInterval: cfg.Log.CacheLogInterval,
+	})
 
 	r.initUpstreams()
 	return r
@@ -110,6 +126,10 @@ func New(cfg *config.FullConfig, client *xclient.DNSClient, cache *xcache.DNSCac
 func (r *Resolver) UpdateConfig(cfg *config.FullConfig) {
 	r.mu.Lock()
 	r.cfg = cfg
+	r.queryLogConfig.Store(queryLogCfg{
+		queryLevel:       cfg.Log.QueryLevel,
+		cacheLogInterval: cfg.Log.CacheLogInterval,
+	})
 	r.mu.Unlock()
 	r.initUpstreams()
 }
@@ -165,6 +185,7 @@ func (r *Resolver) Resolve(msg *dns.Msg, clientAddr string) *dns.Msg {
 			LatencyMs:   0,
 			Action:      ActionCacheHit,
 			Cached:      true,
+			ResultIPs:   extractIPsFromMsg(cached),
 		})
 
 		resp := cached.Copy()
@@ -196,13 +217,13 @@ func (r *Resolver) resolveWithRules(msg *dns.Msg, domain string, q dns.Question,
 		switch ruleResult.RuleType {
 		case rules.TypeBlock:
 			atomic.AddInt64(&r.blockedQueries, 1)
-			r.incrementMap(&r.byAction, string(ActionBlocked))
+			r.incrementMap(&r.byAction, string(ActionRuleBlock))
 			r.emitLog(QueryLog{
 				Timestamp:   time.Now().UTC(),
 				Domain:      domain,
 				Type:        dns.TypeToString[q.Qtype],
 				ClientIP:    clientAddr,
-				Action:      ActionBlocked,
+				Action:      ActionRuleBlock,
 				MatchedRule: ruleResult.RuleID + ":" + ruleResult.RuleDomain,
 			})
 			return r.blockResponse(msg)
@@ -231,38 +252,47 @@ func (r *Resolver) resolveWithRules(msg *dns.Msg, domain string, q dns.Question,
 
 	if cfg.Advanced.AdFilter.Enabled && r.geoManager.MatchAdFilter(domain) {
 		atomic.AddInt64(&r.blockedQueries, 1)
-		r.incrementMap(&r.byAction, string(ActionBlocked))
+		r.incrementMap(&r.byAction, string(ActionAdBlock))
 		r.emitLog(QueryLog{
 			Timestamp:   time.Now().UTC(),
 			Domain:      domain,
 			Type:        dns.TypeToString[q.Qtype],
 			ClientIP:    clientAddr,
-			Action:      ActionBlocked,
+			Action:      ActionAdBlock,
 			MatchedRule: "ad_filter",
 		})
 		return r.blockResponse(msg)
 	}
 
 	remoteCategories := cfg.Routing.Geosite.Remote
-	if len(remoteCategories) > 0 && r.geoManager.MatchGeosite(domain, remoteCategories) {
-		return r.forwardToGroup(msg, domain, q, clientAddr, cfg.DNS.Remote, ActionRemote, "geosite:matched")
-	}
-
 	domesticCategories := cfg.Routing.Geosite.Domestic
-	if len(domesticCategories) > 0 && r.geoManager.MatchGeosite(domain, domesticCategories) {
-		return r.forwardToGroup(msg, domain, q, clientAddr, cfg.DNS.Domestic, ActionDomestic, "geosite:matched")
+
+	if cfg.Advanced.LeakProtection.Mode == "loose" || !cfg.Advanced.LeakProtection.Enabled {
+		if len(domesticCategories) > 0 && r.geoManager.MatchGeosite(domain, domesticCategories) {
+			return r.forwardToGroup(msg, domain, q, clientAddr, cfg.DNS.Domestic, ActionDomestic, "geosite:matched")
+		}
+		if len(remoteCategories) > 0 && r.geoManager.MatchGeosite(domain, remoteCategories) {
+			return r.forwardToGroup(msg, domain, q, clientAddr, cfg.DNS.Remote, ActionRemote, "geosite:matched")
+		}
+	} else {
+		if len(remoteCategories) > 0 && r.geoManager.MatchGeosite(domain, remoteCategories) {
+			return r.forwardToGroup(msg, domain, q, clientAddr, cfg.DNS.Remote, ActionRemote, "geosite:matched")
+		}
+		if len(domesticCategories) > 0 && r.geoManager.MatchGeosite(domain, domesticCategories) {
+			return r.forwardToGroup(msg, domain, q, clientAddr, cfg.DNS.Domestic, ActionDomestic, "geosite:matched")
+		}
 	}
 
 	adFilterCategories := cfg.Routing.Geosite.AdFilter
 	if cfg.Advanced.AdFilter.Enabled && len(adFilterCategories) > 0 && r.geoManager.MatchGeosite(domain, adFilterCategories) {
 		atomic.AddInt64(&r.blockedQueries, 1)
-		r.incrementMap(&r.byAction, string(ActionBlocked))
+		r.incrementMap(&r.byAction, string(ActionAdBlock))
 		r.emitLog(QueryLog{
 			Timestamp:   time.Now().UTC(),
 			Domain:      domain,
 			Type:        dns.TypeToString[q.Qtype],
 			ClientIP:    clientAddr,
-			Action:      ActionBlocked,
+			Action:      ActionAdBlock,
 			MatchedRule: "geosite:ad_filter",
 		})
 		return r.blockResponse(msg)
@@ -276,13 +306,13 @@ func (r *Resolver) resolveWithRules(msg *dns.Msg, domain string, q dns.Question,
 		case "strict":
 			if hasRemote && hasDomestic {
 				atomic.AddInt64(&r.blockedQueries, 1)
-				r.incrementMap(&r.byAction, string(ActionBlocked))
+				r.incrementMap(&r.byAction, string(ActionLeakBlock))
 				r.emitLog(QueryLog{
 					Timestamp:   time.Now().UTC(),
 					Domain:      domain,
 					Type:        dns.TypeToString[q.Qtype],
 					ClientIP:    clientAddr,
-					Action:      ActionBlocked,
+					Action:      ActionLeakBlock,
 					MatchedRule: "leak_protection:strict",
 				})
 				return new(dns.Msg).SetRcode(msg, dns.RcodeNameError)
@@ -304,8 +334,18 @@ func (r *Resolver) forwardToGroup(msg *dns.Msg, domain string, q dns.Question, c
 	result := r.client.QueryGroup(ctx, msg, servers, r.getConfig().Advanced.Concurrency)
 
 	if result.Error != nil {
-		xlog.Warn("DNS query failed for %s via %v: %v", domain, servers, result.Error)
 		r.incrementMap(&r.byStatus, "timeout")
+		r.incrementMap(&r.byAction, string(ActionFailed))
+		r.emitLog(QueryLog{
+			Timestamp:  time.Now().UTC(),
+			Domain:     domain,
+			Type:       dns.TypeToString[q.Qtype],
+			ClientIP:   clientAddr,
+			ServerUsed: fmt.Sprintf("%v", servers),
+			LatencyMs:  float64(result.Latency.Microseconds()) / 1000.0,
+			Action:     ActionFailed,
+			MatchedRule: result.Error.Error(),
+		})
 		return new(dns.Msg).SetRcode(msg, dns.RcodeServerFailure)
 	}
 
@@ -348,6 +388,7 @@ func (r *Resolver) Lookup(ctx context.Context, domain string, qtype uint16) (*Qu
 	msg := new(dns.Msg)
 	msg.SetQuestion(dns.Fqdn(domain), qtype)
 	msg.RecursionDesired = true
+	msg.SetEdns0(uint16(xclient.DefaultEDNSSize), false)
 
 	ql := &QueryLog{
 		Timestamp: time.Now().UTC(),
@@ -359,7 +400,7 @@ func (r *Resolver) Lookup(ctx context.Context, domain string, qtype uint16) (*Qu
 	if result.Matched {
 		switch result.RuleType {
 		case rules.TypeBlock:
-			ql.Action = ActionBlocked
+			ql.Action = ActionRuleBlock
 			ql.MatchedRule = result.RuleID
 			return ql, nil
 		case rules.TypeRedirect:
@@ -385,7 +426,7 @@ func (r *Resolver) Lookup(ctx context.Context, domain string, qtype uint16) (*Qu
 	r.mu.RUnlock()
 
 	if cfg.Advanced.AdFilter.Enabled && r.geoManager.MatchAdFilter(domain) {
-		ql.Action = ActionBlocked
+		ql.Action = ActionAdBlock
 		ql.MatchedRule = "ad_filter"
 		return ql, nil
 	}
@@ -402,7 +443,7 @@ func (r *Resolver) Lookup(ctx context.Context, domain string, qtype uint16) (*Qu
 
 	adFilterCategories := cfg.Routing.Geosite.AdFilter
 	if cfg.Advanced.AdFilter.Enabled && len(adFilterCategories) > 0 && r.geoManager.MatchGeosite(domain, adFilterCategories) {
-		ql.Action = ActionBlocked
+		ql.Action = ActionAdBlock
 		ql.MatchedRule = "geosite:ad_filter"
 		return ql, nil
 	}
@@ -414,7 +455,7 @@ func (r *Resolver) Lookup(ctx context.Context, domain string, qtype uint16) (*Qu
 		switch cfg.Advanced.LeakProtection.Mode {
 		case "strict":
 			if hasRemote && hasDomestic {
-				ql.Action = ActionBlocked
+				ql.Action = ActionLeakBlock
 				ql.MatchedRule = "leak_protection:strict"
 				return ql, nil
 			}
@@ -516,37 +557,184 @@ func (r *Resolver) Uptime() time.Duration {
 	return time.Since(r.startTime)
 }
 
-func (r *Resolver) emitLog(ql QueryLog) {
-	// Get color based on action
-	var color string
-	switch ql.Action {
+func actionLabel(a Action) string {
+	switch a {
 	case ActionDomestic:
-		color = xlog.ColorDomestic  // 绿色 - 国内DNS
+		return "国内"
 	case ActionRemote:
-		color = xlog.ColorRemote    // 青色 - 远程DNS
+		return "远程"
 	case ActionCacheHit:
-		color = xlog.ColorCacheHit  // 黄色 - 缓存命中
-	case ActionBlocked:
-		color = xlog.ColorBlocked   // 红色 - 拦截
+		return "缓存"
+	case ActionAdBlock:
+		return "广告拦截"
+	case ActionLeakBlock:
+		return "防泄漏"
+	case ActionRuleBlock:
+		return "规则拦截"
 	case ActionRedirect:
-		color = xlog.ColorRedirect  // 紫色 - 重定向
+		return "重定向"
 	case ActionDefault:
-		color = xlog.ColorDefault   // 白色 - 默认策略
+		return "默认"
+	case ActionFailed:
+		return "超时"
 	default:
-		color = xlog.ColorDefault
+		return string(a)
+	}
+}
+
+func isIP(s string) bool {
+	return net.ParseIP(s) != nil
+}
+
+func hasTypePrefix(s string) bool {
+	return strings.HasPrefix(s, "HTTPS:") ||
+		strings.HasPrefix(s, "SVCB:") ||
+		strings.HasPrefix(s, "MX:") ||
+		strings.HasPrefix(s, "TXT:") ||
+		strings.HasPrefix(s, "NS:")
+}
+
+func formatResults(ips []string) string {
+	if len(ips) == 0 {
+		return "(无记录)"
+	}
+	var cnames []string
+	var addrs []string
+	var others []string
+	for _, ip := range ips {
+		if isIP(ip) {
+			addrs = append(addrs, ip)
+		} else if hasTypePrefix(ip) {
+			others = append(others, ip)
+		} else {
+			cnames = append(cnames, ip)
+		}
+	}
+	var parts []string
+	if len(cnames) > 0 {
+		parts = append(parts, "CNAME:"+strings.Join(cnames, ","))
+	}
+	if len(addrs) > 0 {
+		if len(addrs) > 3 {
+			parts = append(parts, addrs[0]+",+"+fmt.Sprintf("%d", len(addrs)-1))
+		} else {
+			parts = append(parts, strings.Join(addrs, ","))
+		}
+	}
+	parts = append(parts, others...)
+	return strings.Join(parts, " | ")
+}
+
+func formatRule(rule string) string {
+	if rule == "" || rule == "geosite:matched" || rule == "default_policy" {
+		return ""
+	}
+	return rule
+}
+
+func (r *Resolver) emitLog(ql QueryLog) {
+	qlc := r.queryLogConfig.Load().(queryLogCfg)
+	queryLevel := qlc.queryLevel
+	cacheLogInterval := qlc.cacheLogInterval
+
+	shouldLog := queryLevel != "off"
+
+	if shouldLog && ql.Action == ActionCacheHit && cacheLogInterval > 0 {
+		key := ql.Type + ":" + ql.Domain
+		now := time.Now()
+		if last, ok := r.cacheLogTimes.Load(key); ok {
+			if now.Sub(last.(time.Time)) < time.Duration(cacheLogInterval)*time.Second {
+				shouldLog = false
+			} else {
+				r.cacheLogTimes.Store(key, now)
+			}
+		} else {
+			if cacheLogInterval > 0 {
+				var count int
+				r.cacheLogTimes.Range(func(_, _ interface{}) bool {
+					count++
+					return count < 8192
+				})
+				if count >= 8192 {
+					r.cacheLogTimes.Range(func(k, v interface{}) bool {
+						if now.Sub(v.(time.Time)) > time.Duration(cacheLogInterval)*time.Second {
+							r.cacheLogTimes.Delete(k)
+						}
+						return true
+					})
+				}
+			}
+			r.cacheLogTimes.Store(key, now)
+		}
 	}
 
-	switch ql.Action {
-	case ActionCacheHit:
-		xlog.ColorInfo(color, "[DNS] %s %s %s -> cache hit (%.1fms)",
-			ql.Action, ql.Type, ql.Domain, ql.LatencyMs)
-	case ActionBlocked:
-		xlog.ColorInfo(color, "[DNS] %s %s %s [%s]",
-			ql.Action, ql.Type, ql.Domain, ql.MatchedRule)
-	default:
-		ips := strings.Join(ql.ResultIPs, ",")
-		xlog.ColorInfo(color, "[DNS] %s %s %s -> %s [%s] (%.1fms via %s)",
-			ql.Action, ql.Type, ql.Domain, ips, ql.MatchedRule, ql.LatencyMs, ql.ServerUsed)
+	if shouldLog {
+		var color string
+		switch ql.Action {
+		case ActionDomestic:
+			color = xlog.ColorDomestic
+		case ActionRemote:
+			color = xlog.ColorRemote
+		case ActionCacheHit:
+			color = xlog.ColorCacheHit
+		case ActionAdBlock:
+			color = xlog.ColorAdBlock
+		case ActionLeakBlock:
+			color = xlog.ColorLeakBlock
+		case ActionRuleBlock:
+			color = xlog.ColorRuleBlock
+		case ActionFailed:
+			color = xlog.ColorFailed
+		case ActionRedirect:
+			color = xlog.ColorRedirect
+		case ActionDefault:
+			color = xlog.ColorDefault
+		default:
+			color = xlog.ColorDefault
+		}
+
+		label := actionLabel(ql.Action)
+		labelColored := color + label + xlog.ColorDefault
+
+		switch ql.Action {
+		case ActionCacheHit:
+			results := formatResults(ql.ResultIPs)
+			if results == "(无记录)" {
+				xlog.ColorInfoMulti(color, "%s  %s", labelColored, ql.Domain)
+			} else {
+				xlog.ColorInfoMulti(color, "%s  %s → %s  cache", labelColored, ql.Domain, results)
+			}
+		case ActionAdBlock, ActionLeakBlock, ActionRuleBlock:
+			rule := formatRule(ql.MatchedRule)
+			if rule != "" {
+				xlog.ColorInfoMulti(color, "%s  %s  [%s]", labelColored, ql.Domain, rule)
+			} else {
+				xlog.ColorInfoMulti(color, "%s  %s", labelColored, ql.Domain)
+			}
+		case ActionFailed:
+			xlog.ColorInfoMulti(color, "%s  %s  %.0fms %s  %s", labelColored, ql.Domain, ql.LatencyMs, ql.ServerUsed, ql.MatchedRule)
+		default:
+			results := formatResults(ql.ResultIPs)
+			rule := formatRule(ql.MatchedRule)
+			var debugExtra string
+			if queryLevel == "debug" {
+				parts := make([]string, 0, 2)
+				if ql.TTL > 0 {
+					parts = append(parts, fmt.Sprintf("TTL=%d", ql.TTL))
+				}
+				if ql.ClientIP != "" {
+					parts = append(parts, "client="+ql.ClientIP)
+				}
+				if len(parts) > 0 {
+					debugExtra = "  " + strings.Join(parts, " ")
+				}
+			}
+			if rule != "" {
+				xlog.ColorInfoMulti(color, "%s  %s → %s  %.0fms %s  [%s]%s", labelColored, ql.Domain, results, ql.LatencyMs, ql.ServerUsed, rule, debugExtra)
+			} else {
+				xlog.ColorInfoMulti(color, "%s  %s → %s  %.0fms %s%s", labelColored, ql.Domain, results, ql.LatencyMs, ql.ServerUsed, debugExtra)
+			}
+		}
 	}
 
 	r.histMu.Lock()
@@ -669,6 +857,26 @@ func extractIPsFromMsg(msg *dns.Msg) []string {
 			ips = append(ips, v.AAAA.String())
 		case *dns.CNAME:
 			ips = append(ips, v.Target)
+		case *dns.HTTPS:
+			if v.Priority == 0 {
+				ips = append(ips, "HTTPS:alias "+v.Target)
+			} else {
+				ips = append(ips, "HTTPS:"+v.Target)
+			}
+		case *dns.SVCB:
+			if v.Priority == 0 {
+				ips = append(ips, "SVCB:alias "+v.Target)
+			} else {
+				ips = append(ips, "SVCB:"+v.Target)
+			}
+		case *dns.MX:
+			ips = append(ips, "MX:"+v.Mx)
+		case *dns.TXT:
+			if len(v.Txt) > 0 {
+				ips = append(ips, "TXT:"+strings.Join(v.Txt, " "))
+			}
+		case *dns.NS:
+			ips = append(ips, "NS:"+v.Ns)
 		}
 	}
 	return ips

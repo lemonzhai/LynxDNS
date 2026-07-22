@@ -4,10 +4,10 @@ import (
 	"context"
 	"flag"
 	"fmt"
+	"io"
 	"net"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
@@ -28,7 +28,7 @@ import (
 )
 
 var (
-	version    = "1.0.0"
+	version    = "1.0.3"
 	buildTime  = ""
 	goVersion  = ""
 	buildOS    = ""
@@ -100,12 +100,14 @@ func main() {
 	xlog.SetLevel(xlog.ParseLevel(cfg.Log.Level))
 
 	if cfg.Log.File != "" {
-		logDir := filepath.Dir(cfg.Log.File)
-		os.MkdirAll(logDir, 0755)
-		logFile, err := os.OpenFile(cfg.Log.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+		maxSizeMB := cfg.Log.MaxSize
+		if maxSizeMB <= 0 {
+			maxSizeMB = 10
+		}
+		rfw, err := xlog.NewRotatingWriter(cfg.Log.File, maxSizeMB)
 		if err == nil {
-			xlog.AddOutput(logFile)
-			xlog.Info("log file opened: %s", cfg.Log.File)
+			xlog.AddOutput(rfw)
+			xlog.Info("log file opened: %s (max_size: %dMB)", cfg.Log.File, maxSizeMB)
 		} else {
 			xlog.Warn("failed to open log file %s: %v", cfg.Log.File, err)
 		}
@@ -137,6 +139,7 @@ func main() {
 	res := resolver.New(cfg, dnsClient, dnsCache, ruleEngine, geoMgr)
 
 	cfgMgr.OnChange(func(newCfg *config.FullConfig) {
+		xlog.SetLevel(xlog.ParseLevel(newCfg.Log.Level))
 		xlog.Info("config changed, updating resolver")
 		res.UpdateConfig(newCfg)
 		geoUpdater.Reconfigure(
@@ -196,14 +199,18 @@ func main() {
 		cfg := cfgMgr.Get()
 		xlog.SetLevel(xlog.ParseLevel(cfg.Log.Level))
 
+		outputs := []io.Writer{os.Stdout}
 		if cfg.Log.File != "" {
-			logDir := filepath.Dir(cfg.Log.File)
-			os.MkdirAll(logDir, 0755)
-			logFile, err := os.OpenFile(cfg.Log.File, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0644)
+			maxSizeMB := cfg.Log.MaxSize
+			if maxSizeMB <= 0 {
+				maxSizeMB = 10
+			}
+			rfw, err := xlog.NewRotatingWriter(cfg.Log.File, maxSizeMB)
 			if err == nil {
-				xlog.AddOutput(logFile)
+				outputs = append(outputs, rfw)
 			}
 		}
+		xlog.SetOutputs(outputs)
 
 		res.UpdateConfig(cfg)
 
@@ -247,4 +254,5 @@ func main() {
 	apiSrv.Stop(ctx)
 
 	xlog.Info("LynxDNS stopped")
+	xlog.Close()
 }

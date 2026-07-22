@@ -9,16 +9,20 @@ var wsConnected = false;
 var logAutoFollow = true;
 var activeCatFilter = '';
 
-var catDefs = {
-	'系统':    { 'bg': '#2a1a4a', 'color': '#b388ff' },
-	'远程DNS': { 'bg': '#1a2a4a', 'color': '#64b5f6' },
-	'国内DNS': { 'bg': '#1a3a1a', 'color': '#81c784' },
-	'DNS':     { 'bg': '#1a2a3a', 'color': '#80cbc4' },
-	'Geo':     { 'bg': '#1a3a3a', 'color': '#4dd0e1' },
-	'广告':    { 'bg': '#3a0a2a', 'color': '#f48fb1' },
-	'服务':    { 'bg': '#1a2a3a', 'color': '#80cbc4' },
-	'配置':    { 'bg': '#3a2a0a', 'color': '#ffe082' },
-	'Web':     { 'bg': '#2a2a3a', 'color': '#b0bec5' }
+var queryCatDefs = {
+	'remote':    { 'bg': '#1a2233', 'color': '#81CFE0', 'label': '远程' },
+	'domestic':  { 'bg': '#1a2a1d', 'color': '#33C192', 'label': '国内' },
+	'cache_hit': { 'bg': '#2a2518', 'color': '#F0A020', 'label': '缓存' },
+	'ad_block':  { 'bg': '#2a1a1e', 'color': '#F65A5A', 'label': '广告拦截' },
+	'leak_block':{ 'bg': '#2a2218', 'color': '#F29D79', 'label': '防泄漏' },
+	'rule_block':{ 'bg': '#2a1a1e', 'color': '#F65A5A', 'label': '规则拦截' },
+	'redirected':{ 'bg': '#231a2e', 'color': '#B38CFF', 'label': '重定向' },
+	'failed':    { 'bg': '#2a1a1e', 'color': '#F65A5A', 'label': '超时' },
+	'default':   { 'bg': '#222427', 'color': '#9599A6', 'label': '默认' }
+};
+
+var sysCatDefs = {
+	'sys': { 'bg': '#2a1a4a', 'color': '#b388ff' }
 };
 
 function apiCall(method, path, data) {
@@ -48,14 +52,6 @@ function showToast(msg) {
 	setTimeout(function() { if (t.parentNode) t.remove(); }, 2500);
 }
 
-function fieldRow(label, content) {
-	return E('div', { 'class': 'cbi-value' }, [
-		E('label', { 'class': 'cbi-value-title' }, label),
-		E('div', { 'class': 'cbi-value-field' },
-			(typeof content === 'string') ? [E('span', {}, content)] : [content])
-	]);
-}
-
 function getTimestamp() {
 	var d = new Date();
 	return d.getHours().toString().padStart(2, '0') + ':' +
@@ -76,31 +72,13 @@ function utcToLocal(utcStr) {
 		d.getSeconds().toString().padStart(2, '0');
 }
 
-function getLogCategory(message) {
-	var ml = message.toLowerCase();
-	if (ml.indexOf('started') >= 0 || ml.indexOf('stopped') >= 0 || ml.indexOf('shutting down') >= 0 ||
-		ml.indexOf('signal') >= 0 || ml.indexOf('lynxdns') >= 0 && (ml.indexOf('success') >= 0 || ml.indexOf('init') >= 0)) {
-		return '系统';
-	}
-	if (ml.indexOf('upstream dns') >= 0) {
-		if (ml.indexOf('8.8.8.8') >= 0 || ml.indexOf('1.1.1.1') >= 0 || ml.indexOf('tls://') >= 0 || ml.indexOf('doh') >= 0 || ml.indexOf('https://') >= 0) {
-			return '远程DNS';
-		}
-		if (ml.indexOf('119.29.29.29') >= 0 || ml.indexOf('223.5.5.5') >= 0 || ml.indexOf('114.114') >= 0 || ml.indexOf('udp://') >= 0) {
-			return '国内DNS';
-		}
-		return 'DNS';
-	}
-	if (ml.indexOf('geoip') >= 0 || ml.indexOf('geosite') >= 0) return 'Geo';
-	if (ml.indexOf('ad_filter') >= 0 || ml.indexOf('ad filter') >= 0 || ml.indexOf('adblock') >= 0) return '广告';
-	if (ml.indexOf('api') >= 0 || ml.indexOf('server starting') >= 0 || ml.indexOf('listening') >= 0) return '服务';
-	if (ml.indexOf('rule') >= 0 || ml.indexOf('config') >= 0 || ml.indexOf('reload') >= 0) return '配置';
-	if (ml.indexOf('luci') >= 0) return 'Web';
-	return '';
+function getSysCategory(message) {
+	if (/^(国内|远程|缓存|广告拦截|防泄漏|规则拦截|重定向|超时|默认)\s/.test(message)) return '';
+	return 'sys';
 }
 
-function catBadge(name) {
-	var c = catDefs[name];
+function catBadge(name, defs) {
+	var c = defs[name];
 	if (!c) return '';
 	return '<span style="display:inline-block;padding:0 4px;border-radius:3px;font-size:9px;font-weight:bold;background:' + c.bg + ';color:' + c.color + '">' + name + '</span> ';
 }
@@ -131,8 +109,128 @@ function parseLogMessage(line) {
 	return { level: level, timestamp: timestamp, message: message };
 }
 
+function latencyColor(ms) {
+	if (ms < 50) return '#33C192';
+	if (ms < 200) return '#F0A020';
+	return '#F65A5A';
+}
+
+function formatIpsHtml(ips) {
+	if (!ips || ips.length === 0) return '<span style="color:#666"> → (无记录)</span>';
+	var cnames = [];
+	var addrs = [];
+	ips.forEach(function(ip) {
+		if (ip.indexOf(':') >= 0 && ip.indexOf('.') < 0 && !ip.match(/^\[?[0-9a-f:]+\]?$/i)) {
+			cnames.push(ip);
+		} else if (ip.match(/^[\d.:a-f]+$/i)) {
+			addrs.push(ip);
+		} else {
+			cnames.push(ip);
+		}
+	});
+	var parts = [];
+	if (cnames.length > 0) {
+		parts.push('<span style="color:#B38CFF">CNAME:' + cnames.join(',').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</span>');
+	}
+	if (addrs.length > 0) {
+		var displayAddrs;
+		if (addrs.length > 3) {
+			displayAddrs = addrs.slice(0, 3);
+			var extra = addrs.length - 3;
+			parts.push('<span style="color:#33C192">' + displayAddrs.join(', ') + '</span>' +
+				'<span class="lynxdns-ip-expand" data-ips="' + addrs.join(',').replace(/"/g, '&quot;') + '" ' +
+				'style="color:#737780;cursor:pointer;font-size:10px;margin-left:2px">+' + extra + '</span>');
+		} else {
+			parts.push('<span style="color:#33C192">' + addrs.join(', ') + '</span>');
+		}
+	}
+	return ' → ' + parts.join(' <span style="color:#737780">|</span> ');
+}
+
+var actionLabelMap = {
+	'国内': 'domestic', '远程': 'remote', '缓存': 'cache_hit',
+	'广告拦截': 'ad_block', '防泄漏': 'leak_block', '规则拦截': 'rule_block',
+	'重定向': 'redirected', '超时': 'failed', '默认': 'default'
+};
+
+function parseQueryFromText(msg) {
+	var m = msg.match(/^(国内|远程|缓存|广告拦截|防泄漏|规则拦截|重定向|超时|默认)\s+(.+)$/);
+	if (!m) return null;
+	var action = actionLabelMap[m[1]] || 'default';
+	var rest = m[2];
+	var q = { action: action, domain: '', ips: [], server_used: '', latency_ms: 0, matched_rule: '' };
+
+	if (action === 'cache_hit') {
+		q.domain = rest.trim();
+		return q;
+	}
+
+	if (action === 'failed') {
+		var failMatch = rest.match(/^(\S+)\s+(\d+)ms\s+(\S+)\s+(.+)$/);
+		if (failMatch) {
+			q.domain = failMatch[1];
+			q.latency_ms = parseFloat(failMatch[2]);
+			q.server_used = failMatch[3];
+			q.matched_rule = failMatch[4];
+		} else {
+			q.domain = rest.trim();
+		}
+		return q;
+	}
+
+	if (action === 'ad_block' || action === 'leak_block' || action === 'rule_block') {
+		var blockMatch = rest.match(/^(\S+)\s+\[(.+)\]$/);
+		if (blockMatch) {
+			q.domain = blockMatch[1];
+			q.matched_rule = blockMatch[2];
+		} else {
+			q.domain = rest.trim();
+		}
+		return q;
+	}
+
+	var arrowIdx = rest.indexOf('→');
+	if (arrowIdx >= 0) {
+		q.domain = rest.substring(0, arrowIdx).trim();
+		var after = rest.substring(arrowIdx + 1);
+		var ruleMatch = after.match(/\[([^\]]+)\]\s*$/);
+		if (ruleMatch) {
+			q.matched_rule = ruleMatch[1];
+			after = after.substring(0, ruleMatch.index).trim();
+		}
+		var serverMatch = after.match(/(\d+)ms\s+(\S+)\s*$/);
+		if (serverMatch) {
+			q.latency_ms = parseFloat(serverMatch[1]);
+			q.server_used = serverMatch[2];
+			after = after.substring(0, serverMatch.index).trim();
+		}
+		var ipPart = after.trim();
+		if (ipPart === '(无记录)') {
+			q.ips = [];
+		} else {
+			var sections = ipPart.split(/\s*\|\s*/);
+			sections.forEach(function(sec) {
+				if (sec.indexOf('CNAME:') === 0) {
+					q.ips.push(sec.substring(7));
+				} else if (sec) {
+					q.ips.push(sec);
+				}
+			});
+		}
+	} else {
+		q.domain = rest.trim();
+	}
+	return q;
+}
+
 function colorizeLogLine(line) {
 	if (!line || !line.trim()) return '';
+	var p = parseLogMessage(line);
+	var q = parseQueryFromText(p.message);
+	if (q) {
+		q.timestamp = p.timestamp ? p.timestamp : '';
+		return colorizeQueryLine(q);
+	}
 	var levelColors = {
 		'debug': { 'bg': '#3a3a4a', 'text': '#999' },
 		'info': { 'bg': '#1a3a5c', 'text': '#4a90d9' },
@@ -140,7 +238,6 @@ function colorizeLogLine(line) {
 		'warning': { 'bg': '#3a2a0a', 'text': '#f0ad4e' },
 		'error': { 'bg': '#3a1a1a', 'text': '#d9534f' }
 	};
-	var p = parseLogMessage(line);
 	var escaped = p.message.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 	var lc = levelColors[p.level] || { 'bg': '#2a2a3e', 'text': '#ccc' };
 	var badge = '';
@@ -150,13 +247,12 @@ function colorizeLogLine(line) {
 			'font-size:10px;font-weight:bold;background:' + lc.bg + ';color:' + lc.text + '">' +
 			label + '</span> ';
 	}
-	var catName = getLogCategory(p.message);
-	var cat = catBadge(catName);
+	var catName = getSysCategory(p.message);
 	var timeHtml = p.timestamp
 		? '<span style="color:#666;font-size:11px;margin-right:4px">' + p.timestamp + '</span>'
 		: '';
-	return '<div data-cat="' + catName + '" style="padding:2px 4px;border-bottom:1px solid #222;word-break:break-all;white-space:pre-wrap;line-height:1.6">' +
-		timeHtml + badge + cat + '<span style="color:' + lc.text + '">' + escaped + '</span></div>';
+	return '<div data-type="sys" data-cat="' + catName + '" style="padding:2px 4px;border-bottom:1px solid #222;word-break:break-all;white-space:pre-wrap;line-height:1.6">' +
+		timeHtml + badge + '<span style="color:' + lc.text + '">' + escaped + '</span></div>';
 }
 
 function applyCatFilter() {
@@ -164,8 +260,15 @@ function applyCatFilter() {
 	if (!el) return;
 	var children = el.children;
 	for (var i = 0; i < children.length; i++) {
+		var type = children[i].getAttribute('data-type') || '';
 		var cat = children[i].getAttribute('data-cat') || '';
-		children[i].style.display = (!activeCatFilter || cat === activeCatFilter) ? '' : 'none';
+		if (!activeCatFilter) {
+			children[i].style.display = '';
+		} else if (activeCatFilter === 'sys') {
+			children[i].style.display = (type === 'sys') ? '' : 'none';
+		} else {
+			children[i].style.display = (cat === activeCatFilter) ? '' : 'none';
+		}
 	}
 }
 
@@ -180,57 +283,52 @@ function renderLogHtml(text) {
 }
 
 function colorizeQueryLine(q) {
-	var actionColors = {
-		domestic: { 'bg': '#1a3a1a', 'text': '#5cb85c', 'label': '国内' },
-		remote: { 'bg': '#1a2a4a', 'text': '#4a90d9', 'label': '远程' },
-		blocked: { 'bg': '#3a1a1a', 'text': '#d9534f', 'label': '拦截' },
-		ad_block: { 'bg': '#3a0a2a', 'text': '#e74c9c', 'label': '广告拦截' },
-		leak_blocked: { 'bg': '#3a1a0a', 'text': '#e67e22', 'label': '防泄漏' },
-		rule_blocked: { 'bg': '#3a1a1a', 'text': '#d9534f', 'label': '规则拦截' },
-		redirected: { 'bg': '#2a1a3a', 'text': '#9b59b6', 'label': '重定向' },
-		cache_hit: { 'bg': '#3a2a0a', 'text': '#f0ad4e', 'label': '缓存' },
-		'default': { 'bg': '#2a2a3e', 'text': '#aaa', 'label': '默认' }
-	};
 	var action = q.action || 'default';
-	var rule = q.matched_rule || '';
-	if (action === 'blocked') {
-		if (rule.indexOf('ad_filter') >= 0) {
-			action = 'ad_block';
-		} else if (rule.indexOf('leak_protection') >= 0) {
-			action = 'leak_blocked';
-		} else {
-			action = 'rule_blocked';
-		}
-	}
-	var ac = actionColors[action] || actionColors['default'];
+	var ac = queryCatDefs[action] || queryCatDefs['default'];
 	var time = q.timestamp ? utcToLocal(q.timestamp) : getTimestamp();
 	var domain = (q.domain || '?').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-	var ips = (q.ips || []).join(', ');
 	var server = q.server_used || '';
-	var latency = (q.latency_ms || 0).toFixed(1);
-	var cached = q.cached;
-	var type = q.type || '';
+	var latency = q.latency_ms || 0;
+	var rule = q.matched_rule || '';
+
 	var badge = '<span style="display:inline-block;padding:0 6px;border-radius:3px;' +
-		'font-size:10px;font-weight:bold;background:' + ac.bg + ';color:' + ac.text + '">' +
+		'font-size:10px;font-weight:bold;background:' + ac.bg + ';color:' + ac.color + '">' +
 		ac.label + '</span> ';
-	var domainHtml = '<span style="color:#fff;font-weight:bold">' + domain + '</span>';
-	var typeHtml = type ? '<span style="color:#888;font-size:10px">(' + type + ')</span>' : '';
-	var ipHtml = ips ? '<span style="color:#5cb85c"> → ' + ips + '</span>' : '';
-	var serverHtml = server
-		? '<span style="color:#666;font-size:11px"> [' + server + ' ' + latency + 'ms]</span>'
-		: '';
-	var cachedHtml = cached ? '<span style="color:#f0ad4e;font-size:10px"> (缓存)</span>' : '';
+	var domainHtml = '<span style="color:#F29D79;font-weight:bold">' + domain + '</span>';
+
+	var resultHtml = '';
+	var serverHtml = '';
 	var ruleHtml = '';
-	if (rule && action !== 'default') {
+	var bgStyle = 'background:' + ac.bg;
+
+	if (action === 'cache_hit') {
+	} else if (action === 'failed') {
+		resultHtml = '<span style="color:#F65A5A"> ' + (rule || '查询失败') + '</span>';
+		serverHtml = '<span style="color:#737780;font-size:11px"> ' + server + '</span>';
+	} else if (action === 'ad_block' || action === 'leak_block' || action === 'rule_block') {
 		var ruleLabel = rule;
 		if (rule === 'ad_filter') ruleLabel = '广告过滤';
 		else if (rule === 'geosite:ad_filter') ruleLabel = 'Geosite广告';
 		else if (rule.indexOf('leak_protection') >= 0) ruleLabel = '泄漏保护';
-		ruleHtml = '<span style="color:#555;font-size:10px;margin-left:4px">[' + ruleLabel + ']</span>';
+		ruleHtml = ruleLabel ? '<span style="color:#737780;font-size:10px;margin-left:4px">[' + ruleLabel + ']</span>' : '';
+	} else if (action === 'redirected') {
+		resultHtml = formatIpsHtml(q.ips);
+		serverHtml = '<span style="color:#737780;font-size:11px"> ' + server + '</span>';
+		ruleHtml = rule ? '<span style="color:#737780;font-size:10px;margin-left:4px">[' + rule + ']</span>' : '';
+	} else {
+		resultHtml = formatIpsHtml(q.ips);
+		var latColor = latencyColor(latency);
+		serverHtml = server
+			? '<span style="color:#737780;font-size:11px"> ' + server + ' <span style="color:' + latColor + '">' + latency.toFixed(0) + 'ms</span></span>'
+			: '';
+		if (rule && rule !== 'geosite:matched' && rule !== 'default_policy') {
+			ruleHtml = '<span style="color:#737780;font-size:10px;margin-left:4px">[' + rule + ']</span>';
+		}
 	}
-	return '<div style="padding:3px 4px;border-bottom:1px solid #222;word-break:break-all;white-space:pre-wrap;line-height:1.6;background:#1e1e32">' +
+
+	return '<div data-type="query" data-cat="' + action + '" style="padding:3px 4px;border-bottom:1px solid #222;word-break:break-all;white-space:pre-wrap;line-height:1.6;' + bgStyle + '">' +
 		'<span style="color:#666;font-size:11px;margin-right:4px">' + time + '</span>' +
-		badge + domainHtml + ' ' + typeHtml + ipHtml + cachedHtml + serverHtml + ruleHtml +
+		badge + domainHtml + resultHtml + serverHtml + ruleHtml +
 		'</div>';
 }
 
@@ -347,10 +445,12 @@ return view.extend({
 			'style': 'display:flex;align-items:center;gap:4px'
 		}, ['级别: ', levelSelect]));
 
-		var catOptions = [E('option', { 'value': '', 'selected': true }, '全部分类')];
-		Object.keys(catDefs).forEach(function(key) {
-			catOptions.push(E('option', { 'value': key }, key));
+		var catOptions = [E('option', { 'value': '', 'selected': true }, '全部')];
+		Object.keys(queryCatDefs).forEach(function(key) {
+			catOptions.push(E('option', { 'value': key }, queryCatDefs[key].label));
 		});
+		catOptions.push(E('option', { 'value': 'sys' }, '系统日志'));
+
 		var catSelect = E('select', {
 			'class': 'cbi-input-select',
 			'style': 'height:40px'
@@ -384,15 +484,29 @@ return view.extend({
 		var logContainer = E('div', {
 			'id': 'log-content',
 			'style': 'width:100%;height:400px;font-family:monospace;' +
-				'font-size:12px;resize:vertical;overflow-y:auto;overflow-x:hidden;' +
-				'background:#1a1a2e;color:#e0e0e0;' +
-				'border:1px solid #333;padding:8px'
+				'font-size:13px;resize:vertical;overflow-y:auto;overflow-x:hidden;' +
+				'background:#1A1B1D;color:#D1D3DB;' +
+				'border:1px solid #2A2D31;padding:8px'
 		});
 		logContainer.innerHTML = renderLogHtml((logData && logData.logs) ? logData.logs : '');
 		logSection.appendChild(logContainer);
 		logContainer.addEventListener('scroll', function() {
 			logAutoFollow = (this.scrollTop < 10);
 		});
+
+		logContainer.addEventListener('click', function(e) {
+			var target = e.target;
+			if (target && target.classList && target.classList.contains('lynxdns-ip-expand')) {
+				var ips = target.getAttribute('data-ips');
+				if (ips) {
+					var span = document.createElement('span');
+					span.style.cssText = 'color:#5cb85c';
+					span.textContent = ', ' + ips.split(',').slice(3).join(', ');
+					target.parentNode.replaceChild(span, target);
+				}
+			}
+		});
+
 		m.appendChild(logSection);
 
 		startAutoRefresh();
@@ -431,7 +545,7 @@ return view.extend({
 						var html = colorizeLogLine(line);
 						if (activeCatFilter) {
 							var p = parseLogMessage(line);
-							var catName = getLogCategory(p.message);
+							var catName = getSysCategory(p.message);
 							if (catName !== activeCatFilter) return;
 						}
 						el.innerHTML = html + el.innerHTML;
@@ -468,7 +582,12 @@ return view.extend({
 						if (!el) return;
 						try {
 							var q = JSON.parse(event.data);
-							el.innerHTML = colorizeQueryLine(q) + el.innerHTML;
+							var html = colorizeQueryLine(q);
+							if (activeCatFilter) {
+								var action = q.action || 'default';
+								if (action !== activeCatFilter) return;
+							}
+							el.innerHTML = html + el.innerHTML;
 							while (el.children.length > 500) {
 								el.removeChild(el.lastChild);
 							}

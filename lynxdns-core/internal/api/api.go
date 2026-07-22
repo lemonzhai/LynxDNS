@@ -200,8 +200,9 @@ func (s *Server) handleStatus(w http.ResponseWriter, r *http.Request) {
 	cfg := s.cfg.Get()
 
 	dnsServers := map[string]interface{}{
-		"domestic": buildServerStatusList(cfg.DNS.Domestic, upstreamStatuses),
-		"remote":   buildServerStatusList(cfg.DNS.Remote, upstreamStatuses),
+		"domestic":  buildServerStatusList(cfg.DNS.Domestic, upstreamStatuses),
+		"remote":    buildServerStatusList(cfg.DNS.Remote, upstreamStatuses),
+		"bootstrap": buildServerStatusList(cfg.DNS.Bootstrap, upstreamStatuses),
 	}
 
 	writeOK(w, map[string]interface{}{
@@ -222,15 +223,32 @@ func buildServerStatusList(addrs []string, statuses map[string]*xclient.Upstream
 	for _, addr := range addrs {
 		status := "unknown"
 		var latency float64
+		var info *xclient.UpstreamStatusInfo
 		if s, ok := statuses[addr]; ok {
+			info = s
 			status = s.Status
 			latency = s.AvgLatencyMs
 		}
-		result = append(result, map[string]interface{}{
+		entry := map[string]interface{}{
 			"address":        addr,
 			"status":         status,
 			"avg_latency_ms": latency,
-		})
+		}
+		// 透出按上游维度的统计与熔断字段（向后兼容：旧客户端忽略新字段）
+		if info != nil {
+			entry["requests"] = info.Requests
+			entry["successes"] = info.Successes
+			entry["failures"] = info.Failures
+			entry["timeouts"] = info.Timeouts
+			entry["p95_latency_ms"] = info.P95LatencyMs
+			entry["p99_latency_ms"] = info.P99LatencyMs
+			entry["avg_latency_ms_hist"] = info.AvgLatencyMsHist
+			entry["current_state"] = info.CurrentState
+			entry["trip_count"] = info.TripCount
+			entry["recover_count"] = info.RecoverCount
+			entry["protocol"] = info.Protocol
+		}
+		result = append(result, entry)
 	}
 	return result
 }

@@ -143,8 +143,8 @@ return view.extend({
 		m.appendChild(geositeRemoteSection);
 
 		geositeDomesticList = createTagList(
-			geosite.domestic || ['cn'],
-			['cn', 'cn-apps', 'tld-cn', 'bilibili', 'taobao', 'baidu', 'alibaba', 'tencent', '163'],
+			geosite.domestic || ['cn', 'apple-cn', 'google-cn'],
+			['cn', 'cn-apps', 'apple-cn', 'google-cn', 'tld-cn', 'bilibili', 'taobao', 'baidu', 'alibaba', 'tencent', '163'],
 			'例如 cn'
 		);
 		var geositeDomesticSection = E('fieldset', { 'class': 'cbi-section' }, [

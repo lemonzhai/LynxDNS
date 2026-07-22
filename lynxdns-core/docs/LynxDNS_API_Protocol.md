@@ -150,12 +150,30 @@ GET /api/v1/status
     "memory_mb": 18.5,
     "dns_servers": {
       "domestic": [
-        {"address": "udp://223.5.5.5:53", "status": "up", "avg_latency_ms": 5.2},
+        {
+          "address": "udp://223.5.5.5:53",
+          "status": "up",
+          "avg_latency_ms": 5.2,
+          "requests": 10234,
+          "successes": 10230,
+          "failures": 4,
+          "timeouts": 2,
+          "p95_latency_ms": 12.5,
+          "p99_latency_ms": 18.3,
+          "avg_latency_ms_hist": 5.1,
+          "current_state": "closed",
+          "trip_count": 0,
+          "recover_count": 0,
+          "protocol": "udp"
+        },
         {"address": "udp://119.29.29.29:53", "status": "up", "avg_latency_ms": 4.8}
       ],
       "remote": [
         {"address": "tls://1.1.1.1:853", "status": "up", "avg_latency_ms": 45.1},
         {"address": "https://dns.google/dns-query", "status": "down", "avg_latency_ms": 0}
+      ],
+      "bootstrap": [
+        {"address": "udp://223.5.5.5:53", "status": "up", "avg_latency_ms": 5.0}
       ]
     }
   }
@@ -981,9 +999,27 @@ type ServiceStatus struct {
 }
 
 type ServerStatus struct {
+    // 基础字段（向后兼容，旧客户端可直接使用）
     Address      string  `json:"address"`
-    Status       string  `json:"status"`
-    AvgLatencyMs float64 `json:"avg_latency_ms"`
+    Status       string  `json:"status"`            // up / down / unknown
+    AvgLatencyMs float64 `json:"avg_latency_ms"`    // 即时探测延迟
+
+    // 按上游维度的累计统计（新增）
+    Requests         int64   `json:"requests"`          // 总请求次数
+    Successes        int64   `json:"successes"`         // 成功次数
+    Failures         int64   `json:"failures"`          // 失败次数（含超时）
+    Timeouts         int64   `json:"timeouts"`          // 超时次数
+    P95LatencyMs     float64 `json:"p95_latency_ms"`    // P95 延迟（基于最近 1024 样本）
+    P99LatencyMs     float64 `json:"p99_latency_ms"`    // P99 延迟
+    AvgLatencyMsHist float64 `json:"avg_latency_ms_hist"` // 基于历史样本的平均延迟
+
+    // 熔断器状态（新增）
+    CurrentState string `json:"current_state"` // closed / open / half_open
+    TripCount    int64  `json:"trip_count"`    // 累计熔断次数
+    RecoverCount int64  `json:"recover_count"` // 累计恢复次数
+
+    // 协议（新增）
+    Protocol string `json:"protocol"` // udp / tcp / tls / doh
 }
 ```
 

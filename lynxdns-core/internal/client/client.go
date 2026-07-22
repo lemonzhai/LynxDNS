@@ -3,17 +3,23 @@ package client
 import (
 	"context"
 	"crypto/tls"
+	"errors"
 	"fmt"
 	"io"
 	"net"
 	"net/http"
+	"os"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/miekg/dns"
 	xlog "github.com/lynxdns/lynxdns-core/internal/log"
+	"github.com/lynxdns/lynxdns-core/internal/upstream"
 )
+
+// ErrCircuitOpen 表示上游熔断器处于 open 状态，请求被拒绝。
+var ErrCircuitOpen = errors.New("upstream circuit open")
 
 type Protocol string
 
@@ -22,6 +28,11 @@ const (
 	ProtoTCP Protocol = "tcp"
 	ProtoDoT Protocol = "tls"
 	ProtoDoH Protocol = "https"
+)
+
+const (
+	DefaultEDNSSize uint16 = 1232
+	MaxEDNSSize     uint16 = 4096
 )
 
 type UpstreamConfig struct {
@@ -49,6 +60,8 @@ type upstreamClient struct {
 	config   UpstreamConfig
 	dnsClient *dns.Client
 	conn      net.Conn
+	stats     *upstream.Stats    // 按上游维度的统计
+	breaker   *upstream.Breaker  // 熔断器
 }
 
 func New(timeout time.Duration) *DNSClient {
@@ -105,7 +118,9 @@ func (c *DNSClient) AddUpstream(addr string) {
 	cfg := ParseUpstream(addr)
 
 	uc := &upstreamClient{
-		config: cfg,
+		config:  cfg,
+		stats:   upstream.NewStats(),
+		breaker: upstream.NewBreaker(),
 	}
 
 	switch cfg.Protocol {
@@ -114,6 +129,7 @@ func (c *DNSClient) AddUpstream(addr string) {
 			Net:          "udp",
 			ReadTimeout:  c.timeout,
 			WriteTimeout: c.timeout,
+			UDPSize:      DefaultEDNSSize,
 		}
 	case ProtoTCP:
 		uc.dnsClient = &dns.Client{
@@ -158,14 +174,52 @@ func (c *DNSClient) Query(ctx context.Context, msg *dns.Msg, serverAddr string) 
 		}
 	}
 
+	// 熔断检查：open 状态拒绝请求；冷却到期迁移到 half-open 放行探针。
+	if uc.breaker != nil && !uc.breaker.AllowRequest() {
+		return &Result{
+			Error:      ErrCircuitOpen,
+			ServerUsed: serverAddr,
+		}
+	}
+
 	start := time.Now()
 
+	var result *Result
 	switch uc.config.Protocol {
 	case ProtoDoH:
-		return c.queryDoH(ctx, msg, uc, start)
+		result = c.queryDoH(ctx, msg, uc, start)
 	default:
-		return c.queryDNS(ctx, msg, uc, start)
+		result = c.queryDNS(ctx, msg, uc, start)
 	}
+
+	// 统计与熔断更新（与 DNS 收发解耦，recover 兜底绝不影响主路径）
+	c.recordResult(uc, result)
+
+	return result
+}
+
+// recordResult 根据请求结果更新统计与熔断器状态。
+// isTimeout 通过错误类型判定：context.DeadlineExceeded 或 os.IsTimeout。
+func (c *DNSClient) recordResult(uc *upstreamClient, result *Result) {
+	defer func() { _ = recover() }()
+	if uc == nil || uc.stats == nil || uc.breaker == nil || result == nil {
+		return
+	}
+
+	if result.Error == nil {
+		uc.stats.RecordSuccess(result.Latency)
+		uc.breaker.RecordSuccess()
+		return
+	}
+
+	// 熔断拒绝本身不计入失败统计（避免熔断期间的拒绝进一步累加失败）
+	if errors.Is(result.Error, ErrCircuitOpen) {
+		return
+	}
+
+	isTimeout := errors.Is(result.Error, context.DeadlineExceeded) || os.IsTimeout(result.Error)
+	uc.stats.RecordFailure(isTimeout)
+	uc.breaker.RecordFailure()
 }
 
 func (c *DNSClient) QueryGroup(ctx context.Context, msg *dns.Msg, servers []string, concurrency int) *Result {
@@ -293,8 +347,23 @@ func (c *DNSClient) SetTimeout(timeout time.Duration) {
 }
 
 type UpstreamStatusInfo struct {
+	// 旧字段（保留，向后兼容）
 	Status       string  `json:"status"`
 	AvgLatencyMs float64 `json:"avg_latency_ms"`
+	// 新增：统计
+	Requests         int64   `json:"requests"`
+	Successes        int64   `json:"successes"`
+	Failures         int64   `json:"failures"`
+	Timeouts         int64   `json:"timeouts"`
+	P95LatencyMs     float64 `json:"p95_latency_ms"`
+	P99LatencyMs     float64 `json:"p99_latency_ms"`
+	AvgLatencyMsHist float64 `json:"avg_latency_ms_hist"`
+	// 新增：熔断
+	CurrentState string `json:"current_state"` // closed/open/half_open
+	TripCount    int64  `json:"trip_count"`
+	RecoverCount int64  `json:"recover_count"`
+	// 新增：协议
+	Protocol string `json:"protocol"`
 }
 
 func (c *DNSClient) UpstreamStatuses() map[string]*UpstreamStatusInfo {
@@ -302,25 +371,51 @@ func (c *DNSClient) UpstreamStatuses() map[string]*UpstreamStatusInfo {
 	defer c.mu.RUnlock()
 
 	statuses := make(map[string]*UpstreamStatusInfo)
-	for addr := range c.upstreams {
+	for addr, uc := range c.upstreams {
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		msg := new(dns.Msg)
 		msg.SetQuestion(".", dns.TypeNS)
 		msg.RecursionDesired = true
+		msg.SetEdns0(uint16(DefaultEDNSSize), false)
 
 		start := time.Now()
 		result := c.Query(ctx, msg, addr)
 		latency := time.Since(start)
 		cancel()
 
+		info := &UpstreamStatusInfo{}
+
+		// 即时探测状态（up/down）
 		if result.Error != nil {
-			statuses[addr] = &UpstreamStatusInfo{Status: "down", AvgLatencyMs: 0}
+			info.Status = "down"
+			info.AvgLatencyMs = 0
 		} else {
-			statuses[addr] = &UpstreamStatusInfo{
-				Status:       "up",
-				AvgLatencyMs: float64(latency.Microseconds()) / 1000.0,
-			}
+			info.Status = "up"
+			info.AvgLatencyMs = float64(latency.Microseconds()) / 1000.0
 		}
+
+		// 合并统计与熔断快照
+		if uc.stats != nil {
+			snap := uc.stats.Snapshot()
+			info.Requests = snap.Requests
+			info.Successes = snap.Successes
+			info.Failures = snap.Failures
+			info.Timeouts = snap.Timeouts
+			info.P95LatencyMs = snap.P95LatencyMs
+			info.P99LatencyMs = snap.P99LatencyMs
+			info.AvgLatencyMsHist = snap.AvgLatencyMs
+		}
+		if uc.breaker != nil {
+			bsnap := uc.breaker.Snapshot()
+			info.CurrentState = bsnap.CurrentState
+			info.TripCount = bsnap.TripCount
+			info.RecoverCount = bsnap.RecoverCount
+		}
+		if uc.config.Protocol != "" {
+			info.Protocol = string(uc.config.Protocol)
+		}
+
+		statuses[addr] = info
 	}
 	return statuses
 }

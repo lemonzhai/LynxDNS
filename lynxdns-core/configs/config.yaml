@@ -49,6 +49,8 @@ routing:
       - "gfw"
     domestic:
       - "cn"
+      - "apple-cn"
+      - "google-cn"
     ad_filter:
       - "category-ads-all"
   geoip:
@@ -58,3 +60,6 @@ routing:
 log:
   level: "info"
   file: "/var/log/lynxdns.log"
+  query_level: "info"
+  cache_log_interval: 0
+  max_size: 10

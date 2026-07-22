@@ -8,6 +8,8 @@ import (
 
 	"github.com/miekg/dns"
 	xlog "github.com/lynxdns/lynxdns-core/internal/log"
+
+	"github.com/lynxdns/lynxdns-core/internal/client"
 )
 
 type Handler func(msg *dns.Msg, proto string, clientAddr net.Addr) *dns.Msg
@@ -50,14 +52,27 @@ func (s *DNSServer) Start() error {
 
 		resp := s.handler(r, proto, w.RemoteAddr())
 		if resp != nil {
+			if proto == "udp" {
+				maxSize := uint16(dns.MinMsgSize)
+				if opt := r.IsEdns0(); opt != nil && opt.UDPSize() >= dns.MinMsgSize {
+					maxSize = opt.UDPSize()
+				}
+				if maxSize > client.MaxEDNSSize {
+					maxSize = client.MaxEDNSSize
+				}
+				if uint16(resp.Len()) > maxSize {
+					resp.Truncate(int(maxSize))
+				}
+			}
 			w.WriteMsg(resp)
 		}
 	})
 
 	s.udp = &dns.Server{
-		Addr:    listenAddr,
-		Net:     "udp",
-		Handler: dnsHandler,
+		Addr:     listenAddr,
+		Net:      "udp",
+		Handler:  dnsHandler,
+		UDPSize:  int(client.MaxEDNSSize),
 	}
 
 	s.tcp = &dns.Server{

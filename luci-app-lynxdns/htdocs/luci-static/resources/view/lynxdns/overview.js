@@ -80,18 +80,34 @@ function renderOverviewStats(container, s, running) {
 	cardsRow.appendChild(createStatCard('每秒查询', (s.queries_per_second || 0).toFixed(1), '#5bc0de'));
 	cardsRow.appendChild(createStatCard('已拦截', String(s.blocked_queries || 0), '#d9534f'));
 	cardsRow.appendChild(createStatCard('已重定向', String(s.redirected_queries || 0), '#9b59b6'));
+
+	// 成功率：按 by_action 聚合成功类查询（cache_hit/domestic/remote/redirected/default）
+	var successCount = 0;
+	if (s.by_action) {
+		['cache_hit', 'domestic', 'remote', 'redirected', 'default'].forEach(function(key) {
+			successCount += (s.by_action[key] || 0);
+		});
+	}
+	var successRate = (s.total_queries > 0) ? (successCount / s.total_queries * 100) : 0;
+	cardsRow.appendChild(createStatCard('成功率', successRate.toFixed(1) + '%', '#5cb85c'));
+
+	// 超时率：by_status.timeout / total
+	var timeoutCount = (s.by_status && s.by_status.timeout) || 0;
+	var timeoutRate = (s.total_queries > 0) ? (timeoutCount / s.total_queries * 100) : 0;
+	cardsRow.appendChild(createStatCard('超时率', timeoutRate.toFixed(2) + '%', '#d9534f'));
+
 	container.appendChild(cardsRow);
 
 	if (s.by_action) {
 		var actionColors = {
-			domestic: '#5cb85c', remote: '#4a90d9', blocked: '#d9534f',
-			redirected: '#9b59b6', default: '#777', cache_hit: '#f0ad4e',
-			leak_blocked: '#e67e22'
+			domestic: '#33C192', remote: '#81CFE0', ad_block: '#F65A5A',
+			leak_block: '#F29D79', rule_block: '#F65A5A', failed: '#F65A5A',
+			redirected: '#B38CFF', default: '#9599A6', cache_hit: '#F0A020'
 		};
 		var actionLabels = {
-			domestic: '国内', remote: '远程', blocked: '拦截',
-			redirected: '重定向', default: '常规解析', cache_hit: '缓存',
-			leak_blocked: '防泄漏'
+			domestic: '国内', remote: '远程', ad_block: '广告拦截',
+			leak_block: '防泄漏', rule_block: '规则拦截', failed: '超时',
+			redirected: '重定向', default: '常规解析', cache_hit: '缓存'
 		};
 
 		var total = 0;
@@ -144,44 +160,104 @@ function renderDnsServerStatus(container, st) {
 		return;
 	}
 
+	var thStyle = 'padding:6px 8px;border-bottom:2px solid #ddd;text-align:left;font-size:12px;white-space:nowrap';
+	var tdStyle = 'padding:6px 8px;font-size:12px;white-space:nowrap';
+
 	var table = E('table', {
-		'style': 'width:100%;table-layout:fixed;border-collapse:collapse;margin-top:8px'
+		'style': 'width:100%;border-collapse:collapse;margin-top:8px;table-layout:auto'
 	}, [
 		E('thead', {}, [E('tr', {}, [
-			E('th', { 'style': 'width:15%;text-align:left;padding:6px 10px;border-bottom:2px solid #ddd' }, '类型'),
-			E('th', { 'style': 'width:45%;text-align:left;padding:6px 10px;border-bottom:2px solid #ddd' }, '地址'),
-			E('th', { 'style': 'width:20%;text-align:left;padding:6px 10px;border-bottom:2px solid #ddd' }, '状态'),
-			E('th', { 'style': 'width:20%;text-align:left;padding:6px 10px;border-bottom:2px solid #ddd' }, '平均延迟')
+			E('th', { 'style': thStyle }, '所属组'),
+			E('th', { 'style': thStyle }, '地址'),
+			E('th', { 'style': thStyle }, '协议'),
+			E('th', { 'style': thStyle }, '状态'),
+			E('th', { 'style': thStyle }, '请求'),
+			E('th', { 'style': thStyle }, '成功率'),
+			E('th', { 'style': thStyle }, 'P95'),
+			E('th', { 'style': thStyle }, 'P99'),
+			E('th', { 'style': thStyle }, '超时'),
+			E('th', { 'style': thStyle }, '当前状态'),
+			E('th', { 'style': thStyle }, '熔断/恢复')
 		])])
 	]);
 	var tbody = E('tbody');
 
-	Object.keys(st.dns_servers).forEach(function(group) {
+	var groupLabels = {
+		domestic: '国内', remote: '远程', bootstrap: '引导'
+	};
+	var protocolLabels = {
+		udp: 'UDP', tcp: 'TCP', tls: 'DoT', doh: 'DoH'
+	};
+
+	// 按地址去重：同一物理服务器在内核中只注册一次（共享统计/熔断），
+	// 前端需聚合其归属的所有组，避免重复行。
+	var addrToGroups = {};  // 地址 -> ['国内','引导']
+	var addrOrder = [];      // 唯一地址的首次出现顺序
+	var addrToSrv = {};      // 地址 -> srv 数据（同地址各组数据相同，取首次出现即可）
+
+	['domestic', 'remote', 'bootstrap'].forEach(function(group) {
 		var servers = st.dns_servers[group];
-		var groupLabel = (group === 'domestic') ? '国内'
-			: (group === 'remote') ? '远程'
-			: group;
+		if (!servers || !servers.length) return;
+		var label = groupLabels[group] || group;
 		servers.forEach(function(srv) {
-			var isUp = srv.status === 'up';
-			tbody.appendChild(E('tr', {
-				'style': 'border-bottom:1px solid #eee'
-			}, [
-				E('td', { 'style': 'padding:6px 10px' }, groupLabel),
-				E('td', { 'style': 'padding:6px 10px;word-break:break-all' }, srv.address),
-				E('td', { 'style': 'padding:6px 10px' }, E('span', {
-					'style': 'color:' + (isUp ? '#009900' : '#cc0000') +
-						';font-weight:bold'
-				}, isUp ? '[正常]' : '[故障]')),
-				E('td', { 'style': 'padding:6px 10px' }, isUp
-					? (srv.avg_latency_ms || 0).toFixed(1) + ' ms'
-					: '-')
-			]));
+			if (!addrToGroups[srv.address]) {
+				addrToGroups[srv.address] = [];
+				addrOrder.push(srv.address);
+				addrToSrv[srv.address] = srv;
+			}
+			addrToGroups[srv.address].push(label);
 		});
+	});
+
+	// 按首次出现顺序（domestic -> remote -> bootstrap）渲染去重后的地址
+	addrOrder.forEach(function(addr) {
+		var srv = addrToSrv[addr];
+		var isUp = srv.status === 'up';
+		var requests = srv.requests || 0;
+		var successes = srv.successes || 0;
+		var timeouts = srv.timeouts || 0;
+		var successRate = (requests > 0) ? (successes / requests * 100) : 0;
+		var p95 = srv.p95_latency_ms || 0;
+		var p99 = srv.p99_latency_ms || 0;
+
+		// 当前熔断状态展示
+		var stateLabel = '[正常]';
+		var stateColor = '#009900';
+		if (srv.current_state === 'open') {
+			stateLabel = '[熔断]';
+			stateColor = '#cc0000';
+		} else if (srv.current_state === 'half_open') {
+			stateLabel = '[半开]';
+			stateColor = '#f0ad4e';
+		}
+
+		// 协议展示
+		var protoLabel = protocolLabels[srv.protocol] || (srv.protocol || '-');
+
+		tbody.appendChild(E('tr', {
+			'style': 'border-bottom:1px solid #eee'
+		}, [
+			E('td', { 'style': tdStyle }, addrToGroups[addr].join(' / ')),
+			E('td', { 'style': tdStyle + ';word-break:break-all;white-space:normal' }, srv.address),
+			E('td', { 'style': tdStyle }, protoLabel),
+			E('td', { 'style': tdStyle }, E('span', {
+				'style': 'color:' + (isUp ? '#009900' : '#cc0000') + ';font-weight:bold'
+			}, isUp ? '[正常]' : '[故障]')),
+			E('td', { 'style': tdStyle }, String(requests)),
+			E('td', { 'style': tdStyle }, requests > 0 ? successRate.toFixed(1) + '%' : '-'),
+			E('td', { 'style': tdStyle }, p95 > 0 ? p95.toFixed(1) + ' ms' : '-'),
+			E('td', { 'style': tdStyle }, p99 > 0 ? p99.toFixed(1) + ' ms' : '-'),
+			E('td', { 'style': tdStyle }, String(timeouts)),
+			E('td', { 'style': tdStyle }, E('span', {
+				'style': 'color:' + stateColor + ';font-weight:bold'
+			}, stateLabel)),
+			E('td', { 'style': tdStyle }, (srv.trip_count || 0) + ' / ' + (srv.recover_count || 0))
+		]));
 	});
 
 	table.appendChild(tbody);
 	container.appendChild(E('div', { 'style': 'font-size:13px;font-weight:bold;margin-bottom:4px' }, 'DNS 服务器状态'));
-	container.appendChild(table);
+	container.appendChild(E('div', { 'style': 'overflow-x:auto' }, table));
 }
 
 return view.extend({

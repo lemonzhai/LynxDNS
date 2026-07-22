@@ -1,6 +1,6 @@
 local json = require "luci.jsonc"
 
-local PANEL_VERSION = "1.0.2"
+local PANEL_VERSION = "1.0.3"
 
 module("luci.controller.lynxdns", package.seeall)
 
