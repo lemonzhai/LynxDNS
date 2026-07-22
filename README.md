@@ -45,26 +45,32 @@
 
 ### 一键安装（推荐）
 
-下载对应架构的安装包，通过 iStoreOS/OpenWrt 的离线安装页面上传，或通过 SSH 执行：
+下载安装包，通过 iStoreOS/OpenWrt 的离线安装页面上传，或通过 SSH 执行：
 
 ```bash
 # 下载安装包
-wget https://github.com/lemonzhai/LynxDNS/releases/latest/download/lynxdns_x86_64_luci_all.run
+wget https://github.com/lemonzhai/LynxDNS/releases/latest/download/lynxdns_1.0.3_x86_64_luci.run
 
-# 执行安装
-sh lynxdns_x86_64_luci_all.run
+# 执行安装（自动检测架构）
+sh lynxdns_1.0.3_x86_64_luci.run
 ```
 
 安装完成后，访问 `http://路由器IP/cgi-bin/luci/admin/services/lynxdns` 即可使用。
 
 ### 支持架构
 
-| 架构 | 适用设备 | 安装包 |
-|------|---------|--------|
-| x86_64 | x86 软路由、虚拟机 | `lynxdns_x86_64_luci_all.run` |
-| aarch64 | NanoPi R4S/R2S、树莓派 4 | `lynxdns_aarch64_luci_all.run` |
-| armv7 | ARMv7 路由器 | `lynxdns_armv7_luci_all.run` |
-| mipsel-softfloat | 小米路由 3G、Newifi D2、K2P | `lynxdns_mipsel-softfloat_luci_all.run` |
+安装包内置以下 8 种架构二进制，安装时自动检测：
+
+| 架构 | 适用设备 |
+|------|---------|
+| x86_64 | x86 软路由、虚拟机 |
+| aarch64 | NanoPi R4S/R2S、树莓派 4 |
+| armv7 | ARMv7 路由器 |
+| arm | ARM v5 路由器 |
+| mipsel-softfloat | 小米路由 3G、Newifi D2、K2P |
+| mipsel-hardfloat | MIPS 小端硬浮点设备 |
+| mips-softfloat | 老旧 Broadcom/Atheros 设备 |
+| mips-hardfloat | MIPS 大端硬浮点设备 |
 
 ### 安装参数
 
